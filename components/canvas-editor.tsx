@@ -22,11 +22,15 @@ import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { AddNodeContextMenuContent, EmptyCanvasMenu } from "@/components/add-node-menu";
 import { StaticTextReferenceNode } from "@/components/nodes/static-text-reference-node";
+import {
+  StaticMediaReferenceNode,
+  type StaticMediaReferenceNodeData,
+} from "@/components/nodes/static-media-reference-node";
 import { ImageGenerationNode } from "@/components/nodes/image-generation-node";
 import { saveCanvasGraphAction } from "@/app/canvas-actions";
 import { debounce } from "@/lib/debounce";
 import { createNodeAt, shouldShowEmptyCanvasMenu, type NodeTypeKey } from "@/lib/add-node-menu";
-import { isConnectionAllowed } from "@/lib/connection-rules";
+import { isConnectionAllowed, type DataType } from "@/lib/connection-rules";
 import type { Canvas } from "@/lib/canvas-repo";
 
 const AUTOSAVE_DELAY_MS = 1500;
@@ -34,8 +38,19 @@ const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 
 const nodeTypes = {
   staticTextReference: StaticTextReferenceNode,
+  staticMediaReference: StaticMediaReferenceNode,
   imageGeneration: ImageGenerationNode,
 };
+
+// A Static Media Reference's output type isn't fixed per node type (it's
+// image or video depending on the chosen asset), so connection-rules can't
+// look it up statically — this resolves the concrete type from the node's
+// own data before validating the connection (lib/connection-rules.ts).
+function sourceMediaDataType(node: Node): DataType | null | undefined {
+  if (node.type !== "staticMediaReference") return undefined;
+  const data = node.data as StaticMediaReferenceNodeData;
+  return data.asset?.type ?? null;
+}
 
 function graphNodes(canvas: Canvas): Node[] {
   const nodes = canvas.graph.nodes;
@@ -63,7 +78,10 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   // The right-click point (in flow coordinates) the context menu should
-  // spawn the chosen node at; unset while the menu is closed.
+  // spawn the chosen node at. Set on right-click, consumed and cleared by
+  // the menu's onSelect — not cleared on close, since Radix's onOpenChange
+  // can fire before or after onSelect and clearing there raced with reading
+  // it here, occasionally losing the click position under load.
   const pendingSpawnPosition = useRef<{ x: number; y: number } | null>(null);
 
   const addNode = useCallback(
@@ -93,6 +111,7 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
           target: edge.target,
           targetHandle: edge.targetHandle ?? null,
         })),
+        sourceDataType: sourceMediaDataType(sourceNode),
       });
     },
     [nodes, edges],
@@ -155,11 +174,7 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
         </div>
       </header>
       <div className="relative flex-1">
-        <ContextMenu
-          onOpenChange={(open) => {
-            if (!open) pendingSpawnPosition.current = null;
-          }}
-        >
+        <ContextMenu>
           <ContextMenuTrigger
             className="block h-full w-full"
             onContextMenu={(event) => {

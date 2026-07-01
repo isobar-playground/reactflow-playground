@@ -25,6 +25,16 @@ export interface ConnectionAttempt {
   targetHandle: string | null;
   /** Edges already present, for enforcing per-handle multiplicity. */
   existingEdges: ConnectionAttemptEdge[];
+  /**
+   * Concrete output data type for source node types whose type isn't fixed
+   * per node type (issue #9: a Static Media Reference's output is image or
+   * video depending on which asset it holds, inferred from the file — so
+   * unlike the other node types it has no single entry in
+   * SOURCE_DATA_TYPE). The caller resolves this from the source node's
+   * instance data before calling isConnectionAllowed. Ignored for node
+   * types that already have a fixed entry in SOURCE_DATA_TYPE.
+   */
+  sourceDataType?: DataType | null;
 }
 
 export interface ConnectionAttemptEdge {
@@ -36,7 +46,7 @@ export interface ConnectionAttemptEdge {
 // inbound edges, so they have no entry in `targetHandles` below.
 const SOURCE_DATA_TYPE: Record<NodeTypeKey, DataType | null> = {
   staticTextReference: "text",
-  staticMediaReference: null, // image or video, not modelled until #10/#11 need it
+  staticMediaReference: null, // image or video, per-instance (issue #9): resolved via ConnectionAttempt.sourceDataType
   imageGeneration: "image",
   videoGeneration: "video",
 };
@@ -51,7 +61,7 @@ const TARGET_HANDLES: Partial<Record<NodeTypeKey, Record<string, DataType[]>>> =
 };
 
 export function isConnectionAllowed(attempt: ConnectionAttempt): boolean {
-  const sourceDataType = SOURCE_DATA_TYPE[attempt.sourceType];
+  const sourceDataType = SOURCE_DATA_TYPE[attempt.sourceType] ?? attempt.sourceDataType;
   if (!sourceDataType) return false;
 
   const handles = TARGET_HANDLES[attempt.targetType];

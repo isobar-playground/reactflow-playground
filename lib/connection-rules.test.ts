@@ -59,4 +59,34 @@ describe("isConnectionAllowed", () => {
       isConnectionAllowed(attempt({ sourceType: "videoGeneration", sourceHandle: null })),
     ).toBe(false);
   });
+
+  it("rejects a Static Media Reference with no asset chosen (no concrete data type to check)", () => {
+    expect(
+      isConnectionAllowed(attempt({ sourceType: "staticMediaReference", sourceHandle: null })),
+    ).toBe(false);
+  });
+
+  it("rejects a Static Media Reference holding an image into the text handle (its concrete type is image, not text)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "image",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("allows a Static Media Reference holding text-typed data into the text handle (per-instance type drives the check, not a fixed per-node-type map)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "text",
+        }),
+      ),
+    ).toBe(true);
+  });
 });

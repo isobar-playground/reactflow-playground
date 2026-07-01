@@ -41,4 +41,11 @@ describe("add-node-menu", () => {
     expect(node.type).toBe("imageGeneration");
     expect(node.data).toEqual({ prompt: "", history: { entries: [], activeId: null } });
   });
+
+  it("creates a Static Media Reference with no asset chosen yet", () => {
+    const node = createNodeAt("staticMediaReference", { x: 0, y: 0 });
+
+    expect(node.type).toBe("staticMediaReference");
+    expect(node.data).toEqual({ asset: null });
+  });
 });

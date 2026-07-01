@@ -93,9 +93,15 @@ describe("CanvasEditor right-click menu", () => {
     const user = userEvent.setup();
     const { container } = render(<CanvasEditor canvas={makeCanvas({ nodes: [], edges: [] })} />);
 
-    // Wait for ReactFlow's onInit (needed for screenToFlowPosition) before
-    // right-clicking.
+    // Wait for the empty-canvas menu (cheap, synchronous with render) *and*
+    // for @xyflow/react's onInit, which the component needs before
+    // screenToFlowPosition gives a real answer. onInit fires from a
+    // `setTimeout(…, 1)` once internal viewport measurement completes —
+    // not tied to any DOM change testing-library can observe — so without
+    // this explicit wait the context menu below can fire a beat too early
+    // and silently fall back to the empty-canvas centring position.
     await screen.findByRole("menu", { name: "Add a node" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     const pane = container.querySelector(".react-flow__pane") as HTMLElement;
     fireEvent.contextMenu(pane, { clientX: 321, clientY: 654 });

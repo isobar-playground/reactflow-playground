@@ -42,6 +42,8 @@ function initialDataFor(type: NodeTypeKey): Record<string, unknown> {
   switch (type) {
     case "staticTextReference":
       return { text: "" };
+    case "staticMediaReference":
+      return { asset: null };
     case "imageGeneration":
       return { prompt: "", history: { entries: [], activeId: null } };
     default:
