@@ -7,17 +7,26 @@ export interface Db {
   query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]>;
 }
 
-const SCHEMA = `
-  create table if not exists canvases (
+// One `create table` per statement: `Db.query` runs a single prepared command
+// (both Neon and PGlite reject multiple commands in one call), so migrate()
+// applies them in turn.
+const SCHEMA = [
+  `create table if not exists canvases (
     id         uuid        primary key default gen_random_uuid(),
     name       text        not null    default 'Untitled',
     graph      jsonb       not null    default '{}'::jsonb,
     updated_at timestamptz not null    default now()
-  );
-`;
+  )`,
+  `create table if not exists approved_models (
+    endpoint_id text        primary key,
+    approved_at timestamptz not null    default now()
+  )`,
+];
 
 export async function migrate(db: Db): Promise<void> {
-  await db.query(SCHEMA);
+  for (const statement of SCHEMA) {
+    await db.query(statement);
+  }
 }
 
 let cached: Db | undefined;

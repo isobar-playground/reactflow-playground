@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listModels } from "@/lib/fal-models";
+import { listApprovedEndpointIds } from "@/lib/model-approvals";
 import { ModelsBrowser } from "@/components/models-browser";
 
 // The Model Catalog is read live from FAL (ADR-0006), never snapshotted —
@@ -7,6 +8,10 @@ import { ModelsBrowser } from "@/components/models-browser";
 export const dynamic = "force-dynamic";
 
 export default async function ModelsPage() {
+  // Approvals live in our DB (ADR-0006) and load independently of FAL, so they
+  // resolve even when the catalog fetch below fails.
+  const approvedIds = await listApprovedEndpointIds();
+
   let models = null;
   let failed = false;
   try {
@@ -32,7 +37,7 @@ export default async function ModelsPage() {
           Couldn&apos;t load the model catalog from FAL. Please try again later.
         </p>
       ) : (
-        <ModelsBrowser models={models ?? []} />
+        <ModelsBrowser models={models ?? []} approvedIds={approvedIds} />
       )}
     </main>
   );
