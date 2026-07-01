@@ -42,3 +42,6 @@ next-env.d.ts
 
 # local PGlite data dir
 /.pgdata
+
+# local filesystem Asset Library backend (ADR-0005)
+/public/uploads

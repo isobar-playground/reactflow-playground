@@ -9,7 +9,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 describe("library-actions", () => {
   beforeEach(() => {
-    delete process.env.BLOB_READ_WRITE_TOKEN; // force the local (in-memory) branch
+    delete process.env.BLOB_STORE_ID; // force the in-memory branch (running under Vitest)
     resetAssetLibraryForTests();
   });
 

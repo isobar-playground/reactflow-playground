@@ -12,7 +12,7 @@ A node that only provides data and never consumes it — it has an output but no
 _Avoid_: Source node, input node
 
 **Asset Library**:
-A single shared collection of uploaded files (stored in Vercel Blob), from which a Static Media Reference picks its asset. There is no per-user scoping — everyone sees and uploads to the same library.
+A single shared collection of uploaded files, from which a Static Media Reference picks its asset. There is no per-user scoping — everyone sees and uploads to the same library. Backed by one of several interchangeable storage backends chosen automatically per environment (see ADR-0005); the concept itself doesn't name a specific one.
 _Avoid_: Media library, gallery, uploads
 
 **Static Media Reference**:

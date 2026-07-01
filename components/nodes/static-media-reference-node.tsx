@@ -49,7 +49,7 @@ export type StaticMediaReferenceNodeType = Node<StaticMediaReferenceNodeData, "s
 // local state — otherwise it never reaches autosave and is lost on reload.
 // The picker itself goes through server actions (issue #15): a browser-side
 // import of lib/asset-library hits its own store and, in production, can
-// never reach Vercel Blob since BLOB_READ_WRITE_TOKEN is server-only.
+// never reach Vercel Blob since its credentials are server-only.
 export function StaticMediaReferenceNode({ id, data }: NodeProps<StaticMediaReferenceNodeType>) {
   const { updateNodeData } = useReactFlow();
   const { duplicate, remove } = useNodeActions(id);
