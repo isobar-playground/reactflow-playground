@@ -17,6 +17,9 @@ export default async function Home() {
           <Link href="/library" className="text-sm text-muted-foreground hover:underline">
             Asset Library
           </Link>
+          <Link href="/models" className="text-sm text-muted-foreground hover:underline">
+            Models
+          </Link>
           <NewCanvasButton />
         </div>
       </div>
