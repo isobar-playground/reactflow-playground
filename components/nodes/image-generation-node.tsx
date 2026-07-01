@@ -6,6 +6,7 @@ import {
   Position,
   useNodeConnections,
   useNodesData,
+  useReactFlow,
   type NodeProps,
   type Node,
 } from "@xyflow/react";
@@ -18,6 +19,7 @@ import {
 } from "@/lib/node-history";
 import { resolvedPrompt } from "@/lib/resolved-prompt";
 import { imageGenerationMode, imageGenerationModeLabel } from "@/lib/generation-mode";
+import { cloneVariants } from "@/lib/variant-clone";
 import type { StaticTextReferenceNodeData } from "@/components/nodes/static-text-reference-node";
 
 export type ImageGenerationNodeData = {
@@ -42,6 +44,14 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   const [prompt, setPrompt] = useState(data.prompt);
   const [history, setHistory] = useState<NodeHistory>(data.history);
   const [isGenerating, setIsGenerating] = useState(false);
+  // Variant counter (CONTEXT.md / issue #12): above one, Generate clones this
+  // node into that many independent nodes instead of appending to its own
+  // History. Resets to 1 after cloning. Kept as the raw input string (rather
+  // than clamping on every keystroke) so clearing the field to type a new
+  // number doesn't immediately snap back to "1" mid-edit; it's parsed and
+  // clamped to >= 1 when Generate reads it.
+  const [variantCountInput, setVariantCountInput] = useState("1");
+  const variantCount = Math.max(1, parseInt(variantCountInput, 10) || 1);
 
   const activeEntry = getActiveEntry(history);
 
@@ -65,9 +75,53 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   const mode = imageGenerationMode(imageConnections.length > 0);
   const modeLabel = imageGenerationModeLabel(mode);
 
+  const { getNode, getEdges, addNodes, addEdges } = useReactFlow();
+
+  // Variant cloning (CONTEXT.md / issue #12): when the counter is above one,
+  // Generate clones this node into that many independent nodes instead of
+  // appending to its own History. Each clone inherits only the original's
+  // incoming edges (lib/variant-clone.ts), is laid out with an offset, and
+  // generates its own single fresh output — never a copy of this node's
+  // History. The counter resets to 1 afterward.
+  async function handleGenerateVariants(count: number) {
+    setIsGenerating(true);
+    const node = getNode(id);
+    if (!node) {
+      setIsGenerating(false);
+      return;
+    }
+    const { nodes: clones, edges: clonedEdges } = cloneVariants(
+      { ...node, data: { ...node.data, prompt } },
+      getEdges(),
+      count,
+    );
+
+    const generated = await Promise.all(clones.map(() => generateImagePlaceholder()));
+    const clonesWithOutput = clones.map((clone, index) => ({
+      ...clone,
+      data: {
+        ...clone.data,
+        history: appendEntry(clone.data.history as NodeHistory, {
+          id: crypto.randomUUID(),
+          prompt,
+          output: generated[index],
+        }),
+      },
+    }));
+
+    addNodes(clonesWithOutput);
+    addEdges(clonedEdges);
+    setVariantCountInput("1");
+    setIsGenerating(false);
+  }
+
   // Every Generate/Regenerate appends a new History entry — even with an
   // unchanged prompt — and that entry becomes the Active Output (CONTEXT.md).
   async function handleGenerate() {
+    if (variantCount > 1) {
+      await handleGenerateVariants(variantCount);
+      return;
+    }
     setIsGenerating(true);
     const result = await generateImagePlaceholder();
     setHistory((current) =>
@@ -184,6 +238,22 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
           <div>{resolvedPromptText}</div>
         </div>
       )}
+
+      <div className="mb-3 flex items-center gap-2">
+        <label htmlFor={`variant-count-${id}`} className="text-xs text-muted-foreground">
+          Variants
+        </label>
+        <input
+          id={`variant-count-${id}`}
+          aria-label="Variant count"
+          type="number"
+          min={1}
+          value={variantCountInput}
+          onChange={(event) => setVariantCountInput(event.target.value)}
+          onBlur={() => setVariantCountInput(String(variantCount))}
+          className="nodrag w-16 rounded-md border border-border bg-background p-1 text-sm outline-none"
+        />
+      </div>
 
       <button
         type="button"

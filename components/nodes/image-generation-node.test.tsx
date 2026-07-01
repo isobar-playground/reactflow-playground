@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ReactFlow, ReactFlowProvider, type Edge, type Node } from "@xyflow/react";
+import {
+  ReactFlow,
+  ReactFlowProvider,
+  useNodesState,
+  useEdgesState,
+  type Edge,
+  type Node,
+} from "@xyflow/react";
 import * as generationMock from "@/lib/generation-mock";
 import { ImageGenerationNode, type ImageGenerationNodeData } from "./image-generation-node";
 import { StaticTextReferenceNode } from "./static-text-reference-node";
@@ -320,6 +327,207 @@ describe("ImageGenerationNode text handle and Resolved Prompt", () => {
     renderWithTextRef(nodes, edges);
 
     expect(screen.getByText("a red car a happy dog combined")).toBeInTheDocument();
+  });
+});
+
+// Variant cloning (issue #12) adds sibling nodes to the graph via
+// useReactFlow's addNodes/addEdges from inside the node component. That only
+// takes effect when the surrounding <ReactFlow> is wired the same way
+// components/canvas-editor.tsx wires it — nodes/edges owned by
+// useNodesState/useEdgesState with onNodesChange/onEdgesChange passed
+// through — unlike the static `nodes={[...]}` literal the other tests in
+// this file use, which has nowhere for an internal addNodes change to flow.
+function renderInCanvas(initialNodes: Node[]) {
+  function TestCanvas() {
+    const [nodes, , onNodesChange] = useNodesState<Node>(initialNodes);
+    const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+    return (
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+      />
+    );
+  }
+  return render(
+    <ReactFlowProvider>
+      <TestCanvas />
+    </ReactFlowProvider>,
+  );
+}
+
+describe("ImageGenerationNode variant cloning (issue #12)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows a variant counter defaulting to 1", () => {
+    renderNode();
+
+    expect(screen.getByRole("spinbutton", { name: /variant/i })).toHaveValue(1);
+  });
+
+  it("clones the node into that many independent nodes when the counter is above one and Generate is clicked", async () => {
+    const generate = vi
+      .spyOn(generationMock, "generateImagePlaceholder")
+      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c1/768/768" })
+      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c2/768/768" })
+      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c3/768/768" });
+    const user = userEvent.setup();
+    renderInCanvas([
+      {
+        id: "n1",
+        type: "imageGeneration",
+        position: { x: 0, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: { prompt: "", history: { entries: [], activeId: null } },
+      },
+    ]);
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "3");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(generate).toHaveBeenCalledTimes(3);
+    });
+
+    // Three sibling nodes now exist in the graph, each showing its own
+    // freshly generated output — not a copy of any shared History. The
+    // original itself gets no new History entry of its own: cloning
+    // replaces its generation rather than adding a fourth entry alongside
+    // the clones.
+    await waitFor(() => {
+      expect(screen.getAllByRole("img", { name: "Generation output" })).toHaveLength(3);
+    });
+    const outputs = screen.getAllByRole("img", { name: "Generation output" });
+    expect(outputs.map((img) => img.getAttribute("src")).sort()).toEqual([
+      "https://picsum.photos/seed/c1/768/768",
+      "https://picsum.photos/seed/c2/768/768",
+      "https://picsum.photos/seed/c3/768/768",
+    ]);
+  });
+
+  it("resets the variant counter to 1 after cloning", async () => {
+    vi.spyOn(generationMock, "generateImagePlaceholder").mockResolvedValue({
+      kind: "image",
+      url: "https://picsum.photos/seed/c1/768/768",
+    });
+    const user = userEvent.setup();
+    renderNode();
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "2");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(counter).toHaveValue(1);
+    });
+  });
+
+  it("behaves exactly as a normal Generate when the counter is left at 1 (no cloning)", async () => {
+    vi.spyOn(generationMock, "generateImagePlaceholder").mockResolvedValue({
+      kind: "image",
+      url: "https://picsum.photos/seed/solo/768/768",
+    });
+    const user = userEvent.setup();
+    renderNode();
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    const images = await screen.findAllByRole("img", { name: "Generation output" });
+    expect(images).toHaveLength(1);
+    expect(images[0]).toHaveAttribute("src", "https://picsum.photos/seed/solo/768/768");
+  });
+
+  it("wires each clone to the original's incoming Static Text Reference, without duplicating any outgoing edge", async () => {
+    vi.spyOn(generationMock, "generateImagePlaceholder").mockResolvedValue({
+      kind: "image",
+      url: "https://picsum.photos/seed/c1/768/768",
+    });
+    const user = userEvent.setup();
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "ref1",
+          type: "staticTextReference",
+          position: { x: -300, y: 0 },
+          initialWidth: 200,
+          initialHeight: 100,
+          data: { text: "a red car" },
+        },
+        {
+          id: "gen1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "", history: { entries: [], activeId: null } },
+        },
+        {
+          id: "downstream",
+          type: "imageGeneration",
+          position: { x: 600, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "", history: { entries: [], activeId: null } },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([
+        { id: "e1", source: "ref1", target: "gen1", targetHandle: "text" },
+        { id: "e2", source: "gen1", target: "downstream", targetHandle: "image" },
+      ]);
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    // Two nodes of type imageGeneration exist (gen1 and downstream); scope
+    // to gen1's own counter/button via its data-node-id.
+    const gen1Container = document.querySelector('[data-node-id="gen1"]') as HTMLElement;
+    const counter = within(gen1Container).getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "2");
+    await user.click(within(gen1Container).getByRole("button", { name: "Generate" }));
+
+    // The two clones are new imageGeneration nodes distinct from gen1 and
+    // downstream; each should show the Resolved Prompt from the inherited
+    // text edge, proving it was wired to a fresh incoming edge — not to
+    // downstream, which never had a text edge in the first place.
+    await waitFor(() => {
+      const nodeContainers = Array.from(
+        document.querySelectorAll<HTMLElement>(".react-flow__node[data-id]"),
+      );
+      const cloneContainers = nodeContainers.filter(
+        (el) => !["gen1", "downstream", "ref1"].includes(el.dataset.id ?? ""),
+      );
+      expect(cloneContainers).toHaveLength(2);
+      for (const clone of cloneContainers) {
+        expect(within(clone).getByText("a red car")).toBeInTheDocument();
+      }
+    });
+
+    // downstream never had a text edge, and outgoing edges from gen1 are
+    // never duplicated onto a clone — it must still show no Resolved Prompt.
+    const downstreamContainer = document.querySelector('[data-node-id="downstream"]') as HTMLElement;
+    expect(within(downstreamContainer).queryByText(/resolved prompt/i)).not.toBeInTheDocument();
   });
 });
 

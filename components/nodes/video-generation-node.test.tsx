@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ReactFlow, ReactFlowProvider, type Edge, type Node } from "@xyflow/react";
+import {
+  ReactFlow,
+  ReactFlowProvider,
+  useNodesState,
+  useEdgesState,
+  type Edge,
+  type Node,
+} from "@xyflow/react";
 import * as generationMock from "@/lib/generation-mock";
 import { VideoGenerationNode, type VideoGenerationNodeData } from "./video-generation-node";
 import { StaticTextReferenceNode } from "./static-text-reference-node";
@@ -224,6 +231,159 @@ describe("VideoGenerationNode text handle and Resolved Prompt", () => {
     renderWithNodes(nodes, edges);
 
     expect(screen.getByText("a red car driving fast")).toBeInTheDocument();
+  });
+});
+
+// Variant cloning (issue #12) adds sibling nodes to the graph via
+// useReactFlow's addNodes/addEdges from inside the node component. That only
+// takes effect when the surrounding <ReactFlow> is wired the same way
+// components/canvas-editor.tsx wires it — nodes/edges owned by
+// useNodesState/useEdgesState with onNodesChange/onEdgesChange passed
+// through — unlike the static `nodes={[...]}` literal renderNode uses above.
+function renderInCanvas(initialNodes: Node[], initialEdges: Edge[] = []) {
+  function TestCanvas() {
+    const [nodes, , onNodesChange] = useNodesState<Node>(initialNodes);
+    const [edges, , onEdgesChange] = useEdgesState<Edge>(initialEdges);
+    return (
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+      />
+    );
+  }
+  return render(
+    <ReactFlowProvider>
+      <TestCanvas />
+    </ReactFlowProvider>,
+  );
+}
+
+describe("VideoGenerationNode variant cloning (issue #12)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows a variant counter defaulting to 1", () => {
+    renderNode();
+
+    expect(screen.getByRole("spinbutton", { name: /variant/i })).toHaveValue(1);
+  });
+
+  it("clones the node into that many independent nodes when the counter is above one and Generate is clicked", async () => {
+    const generate = vi
+      .spyOn(generationMock, "generateVideoPlaceholder")
+      .mockResolvedValue({ kind: "video", url: "/sample-video.mp4" });
+    const user = userEvent.setup();
+    const { container } = renderInCanvas([
+      {
+        id: "n1",
+        type: "videoGeneration",
+        position: { x: 0, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: { prompt: "", history: { entries: [], activeId: null } },
+      },
+    ]);
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "3");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(generate).toHaveBeenCalledTimes(3);
+    });
+
+    // Three sibling nodes now exist in the graph, each with its own freshly
+    // generated video output — not a copy of any shared History.
+    await waitFor(() => {
+      expect(container.querySelectorAll("video")).toHaveLength(3);
+    });
+  });
+
+  it("resets the variant counter to 1 after cloning", async () => {
+    vi.spyOn(generationMock, "generateVideoPlaceholder").mockResolvedValue({
+      kind: "video",
+      url: "/sample-video.mp4",
+    });
+    const user = userEvent.setup();
+    renderNode();
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "2");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(counter).toHaveValue(1);
+    });
+  });
+
+  it("behaves exactly as a normal Generate when the counter is left at 1 (no cloning)", async () => {
+    vi.spyOn(generationMock, "generateVideoPlaceholder").mockResolvedValue({
+      kind: "video",
+      url: "/sample-video.mp4",
+    });
+    const user = userEvent.setup();
+    const { container } = renderNode();
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(container.querySelectorAll("video")).toHaveLength(1);
+    });
+  });
+
+  it("wires each clone to the original's incoming Static Text Reference, without duplicating any outgoing edge", async () => {
+    vi.spyOn(generationMock, "generateVideoPlaceholder").mockResolvedValue({
+      kind: "video",
+      url: "/sample-video.mp4",
+    });
+    const user = userEvent.setup();
+
+    renderInCanvas(
+      [
+        {
+          id: "ref1",
+          type: "staticTextReference",
+          position: { x: -300, y: 0 },
+          initialWidth: 200,
+          initialHeight: 100,
+          data: { text: "a red car" },
+        },
+        {
+          id: "gen1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "", history: { entries: [], activeId: null } },
+        },
+      ],
+      [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }],
+    );
+
+    const gen1Container = document.querySelector('[data-node-id="gen1"]') as HTMLElement;
+    const counter = within(gen1Container).getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "2");
+    await user.click(within(gen1Container).getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      const nodeContainers = Array.from(
+        document.querySelectorAll<HTMLElement>(".react-flow__node[data-id]"),
+      );
+      const cloneContainers = nodeContainers.filter(
+        (el) => !["gen1", "ref1"].includes(el.dataset.id ?? ""),
+      );
+      expect(cloneContainers).toHaveLength(2);
+      for (const clone of cloneContainers) {
+        expect(within(clone).getByText("a red car")).toBeInTheDocument();
+      }
+    });
   });
 });
 
