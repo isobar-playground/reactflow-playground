@@ -17,6 +17,7 @@ import {
   type NodeHistory,
 } from "@/lib/node-history";
 import { resolvedPrompt } from "@/lib/resolved-prompt";
+import { imageGenerationMode, imageGenerationModeLabel } from "@/lib/generation-mode";
 import type { StaticTextReferenceNodeData } from "@/components/nodes/static-text-reference-node";
 
 export type ImageGenerationNodeData = {
@@ -34,7 +35,9 @@ const DECORATIVE_CHIPS = ["1K", "1:1", "Light", "Style", "Camera"];
 // The core Generation Node (CONTEXT.md): a Generation Node with an output
 // handle and named input handles. Issue #8 adds the `text` input handle,
 // which accepts Static Text References and feeds the Resolved Prompt
-// preview; the `image` handle and edit-mode switch are issue #10.
+// preview; issue #10 adds the `image` handle and the derived edit-mode
+// label — the mode is never chosen by hand, only computed from whether any
+// image is connected.
 export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeType>) {
   const [prompt, setPrompt] = useState(data.prompt);
   const [history, setHistory] = useState<NodeHistory>(data.history);
@@ -55,6 +58,12 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   );
   const connectedTexts = connectedTextNodeIds.map((nodeId) => connectedTextByNodeId.get(nodeId) ?? "");
   const resolvedPromptText = resolvedPrompt(connectedTexts, prompt);
+
+  // Mode (CONTEXT.md / issue #10): derived from whether any image is
+  // connected to the `image` handle — never chosen by hand.
+  const imageConnections = useNodeConnections({ id, handleType: "target", handleId: "image" });
+  const mode = imageGenerationMode(imageConnections.length > 0);
+  const modeLabel = imageGenerationModeLabel(mode);
 
   // Every Generate/Regenerate appends a new History entry — even with an
   // unchanged prompt — and that entry becomes the Active Output (CONTEXT.md).
@@ -78,7 +87,12 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
 
   return (
     <div className="w-96 rounded-xl border border-border bg-card p-3 shadow-sm" data-node-id={id}>
-      <div className="mb-2 text-xs font-medium text-muted-foreground">Image Generation Node</div>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">Image Generation Node</span>
+        <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+          {modeLabel}
+        </span>
+      </div>
 
       <div className="mb-3 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg bg-muted">
         {isGenerating ? (
@@ -180,7 +194,8 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
       </button>
 
-      <Handle type="target" position={Position.Left} id="text" />
+      <Handle type="target" position={Position.Left} id="text" style={{ top: "35%" }} />
+      <Handle type="target" position={Position.Left} id="image" style={{ top: "65%" }} />
       <Handle type="source" position={Position.Right} />
     </div>
   );

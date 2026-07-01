@@ -5,8 +5,13 @@ import { ReactFlow, ReactFlowProvider, type Edge, type Node } from "@xyflow/reac
 import * as generationMock from "@/lib/generation-mock";
 import { ImageGenerationNode, type ImageGenerationNodeData } from "./image-generation-node";
 import { StaticTextReferenceNode } from "./static-text-reference-node";
+import { StaticMediaReferenceNode } from "./static-media-reference-node";
 
-const nodeTypes = { imageGeneration: ImageGenerationNode, staticTextReference: StaticTextReferenceNode };
+const nodeTypes = {
+  imageGeneration: ImageGenerationNode,
+  staticTextReference: StaticTextReferenceNode,
+  staticMediaReference: StaticMediaReferenceNode,
+};
 
 function renderNode(
   data: ImageGenerationNodeData = { prompt: "", history: { entries: [], activeId: null } },
@@ -238,13 +243,13 @@ describe("ImageGenerationNode text handle and Resolved Prompt", () => {
     );
   }
 
-  it("renders a target text handle in addition to the source output handle", () => {
+  it("renders target text and image handles in addition to the source output handle", () => {
     const { container } = renderNode();
 
     const handles = container.querySelectorAll(".react-flow__handle");
-    expect(handles).toHaveLength(2);
-    const targetHandle = container.querySelector(".react-flow__handle.target");
-    expect(targetHandle).not.toBeNull();
+    expect(handles).toHaveLength(3);
+    expect(container.querySelector('.react-flow__handle[data-handleid="text"]')).not.toBeNull();
+    expect(container.querySelector('.react-flow__handle[data-handleid="image"]')).not.toBeNull();
   });
 
   it("shows the Resolved Prompt preview combining a connected Static Text Reference with the local prompt", () => {
@@ -315,5 +320,76 @@ describe("ImageGenerationNode text handle and Resolved Prompt", () => {
     renderWithTextRef(nodes, edges);
 
     expect(screen.getByText("a red car a happy dog combined")).toBeInTheDocument();
+  });
+});
+
+describe("ImageGenerationNode mode (issue #10)", () => {
+  function renderWithNodes(nodes: Node[], edges: Edge[]) {
+    return render(
+      <ReactFlowProvider>
+        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} />
+      </ReactFlowProvider>,
+    );
+  }
+
+  it("shows the text-to-image mode label when no image is connected", () => {
+    renderNode();
+
+    expect(screen.getByText("Text → Image")).toBeInTheDocument();
+  });
+
+  it("switches to the image-to-image (edit) mode label when an image is connected to the image handle", () => {
+    const nodes: Node[] = [
+      {
+        id: "media1",
+        type: "staticMediaReference",
+        position: { x: 0, y: 0 },
+        initialWidth: 200,
+        initialHeight: 200,
+        data: { asset: { url: "https://example.com/a.png", name: "a.png", type: "image" } },
+      },
+      {
+        id: "gen1",
+        type: "imageGeneration",
+        position: { x: 300, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: { prompt: "", history: { entries: [], activeId: null } },
+      },
+    ];
+    const edges: Edge[] = [
+      { id: "e1", source: "media1", target: "gen1", targetHandle: "image" },
+    ];
+
+    renderWithNodes(nodes, edges);
+
+    expect(screen.getByText("Image → Image (Edit)")).toBeInTheDocument();
+    expect(screen.queryByText("Text → Image")).not.toBeInTheDocument();
+  });
+
+  it("stays in text-to-image mode when only the text handle has connections (image handle empty)", () => {
+    const nodes: Node[] = [
+      {
+        id: "ref1",
+        type: "staticTextReference",
+        position: { x: 0, y: 0 },
+        initialWidth: 200,
+        initialHeight: 100,
+        data: { text: "a red car" },
+      },
+      {
+        id: "gen1",
+        type: "imageGeneration",
+        position: { x: 300, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: { prompt: "", history: { entries: [], activeId: null } },
+      },
+    ];
+    const edges: Edge[] = [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }];
+
+    renderWithNodes(nodes, edges);
+
+    expect(screen.getByText("Text → Image")).toBeInTheDocument();
   });
 });

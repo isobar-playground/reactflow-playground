@@ -57,6 +57,10 @@ const SOURCE_DATA_TYPE: Record<NodeTypeKey, DataType | null> = {
 const TARGET_HANDLES: Partial<Record<NodeTypeKey, Record<string, DataType[]>>> = {
   imageGeneration: {
     text: ["text"],
+    // image (issue #10): accepts images only — many allowed (a Static Media
+    // Reference image or another Image Generation Node's output), never
+    // video (CONTEXT.md: video -> Image Generation Node is never allowed).
+    image: ["image"],
   },
 };
 

@@ -89,4 +89,54 @@ describe("isConnectionAllowed", () => {
       ),
     ).toBe(true);
   });
+
+  it("allows a Static Media Reference holding an image into the image handle (issue #10: image->image edit input)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "image",
+          targetHandle: "image",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("allows an Image Generation Node's output to chain into another Image Generation Node's image handle (edit mode from a generated image)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "imageGeneration",
+          sourceHandle: null,
+          targetHandle: "image",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a Static Media Reference holding a video into the image handle (video cannot connect into an Image Generation Node)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "video",
+          targetHandle: "image",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a Video Generation Node's output into the image handle (video cannot connect into an Image Generation Node)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "videoGeneration",
+          sourceHandle: null,
+          targetHandle: "image",
+        }),
+      ),
+    ).toBe(false);
+  });
 });
