@@ -1,15 +1,19 @@
-import type { ImagePlaceholderResult } from "./generation-mock";
+import type { ImagePlaceholderResult, VideoPlaceholderResult } from "./generation-mock";
 
 // Per-node History (CONTEXT.md): the ordered list of outputs a single
 // Generation Node has produced. One entry is the Active Output — what the
 // node displays and what downstream consumers would read. The caller builds
 // the full HistoryEntry (including its id) so this module stays pure and
 // needs no id-generation mocking in tests.
+//
+// The output is a union (issue #11 adds VideoPlaceholderResult for the
+// Video Generation Node) since History is the same shape for both Image and
+// Video Generation Nodes — only the placeholder kind differs.
 
 export interface HistoryEntry {
   id: string;
   prompt: string;
-  output: ImagePlaceholderResult;
+  output: ImagePlaceholderResult | VideoPlaceholderResult;
 }
 
 export interface NodeHistory {

@@ -21,6 +21,8 @@ export interface ConnectionAttempt {
   /** Handle id on the source node, or null for a node with a single implicit output. */
   sourceHandle: string | null;
   targetType: NodeTypeKey;
+  /** Id of the target node, used to scope existingEdges when checking per-handle multiplicity. */
+  targetId: string;
   /** Handle id on the target node, or null when the target has no named input handles. */
   targetHandle: string | null;
   /** Edges already present, for enforcing per-handle multiplicity. */
@@ -62,7 +64,30 @@ const TARGET_HANDLES: Partial<Record<NodeTypeKey, Record<string, DataType[]>>> =
     // video (CONTEXT.md: video -> Image Generation Node is never allowed).
     image: ["image"],
   },
+  videoGeneration: {
+    text: ["text"],
+    // startFrame / endFrame (issue #11): exactly one image each.
+    startFrame: ["image"],
+    endFrame: ["image"],
+    // imageReference (issue #11): many images allowed.
+    imageReference: ["image"],
+    // video (issue #11): exactly one video. Connecting it is mutually
+    // exclusive with startFrame/endFrame/imageReference — enforced below,
+    // not here, since it depends on what else is already connected.
+    video: ["video"],
+  },
 };
+
+// Handles that accept only a single incoming edge (CONTEXT.md: start frame
+// and end frame accept exactly one image; video accepts exactly one video).
+const SINGLE_CONNECTION_HANDLES: Partial<Record<NodeTypeKey, string[]>> = {
+  videoGeneration: ["startFrame", "endFrame", "video"],
+};
+
+// Video-exclusivity (CONTEXT.md / issue #11): connecting a video blocks
+// startFrame/endFrame/imageReference, and vice versa — only `text` may
+// coexist with a connected video.
+const VIDEO_EXCLUSIVE_HANDLES = ["startFrame", "endFrame", "imageReference", "video"];
 
 export function isConnectionAllowed(attempt: ConnectionAttempt): boolean {
   const sourceDataType = SOURCE_DATA_TYPE[attempt.sourceType] ?? attempt.sourceDataType;
@@ -75,5 +100,36 @@ export function isConnectionAllowed(attempt: ConnectionAttempt): boolean {
   const acceptedTypes = handles[attempt.targetHandle];
   if (!acceptedTypes) return false; // unknown/unsupported handle
 
-  return acceptedTypes.includes(sourceDataType);
+  if (!acceptedTypes.includes(sourceDataType)) return false;
+
+  const edgesOnTarget = attempt.existingEdges.filter((edge) => edge.target === attempt.targetId);
+
+  const singleHandles = SINGLE_CONNECTION_HANDLES[attempt.targetType];
+  if (singleHandles?.includes(attempt.targetHandle)) {
+    const alreadyConnected = edgesOnTarget.some(
+      (edge) => edge.targetHandle === attempt.targetHandle,
+    );
+    if (alreadyConnected) return false;
+  }
+
+  if (
+    attempt.targetType === "videoGeneration" &&
+    VIDEO_EXCLUSIVE_HANDLES.includes(attempt.targetHandle)
+  ) {
+    if (attempt.targetHandle === "video") {
+      // Connecting a video is blocked if any frame/image-reference is
+      // already connected.
+      const hasFrameOrImageRef = edgesOnTarget.some((edge) =>
+        ["startFrame", "endFrame", "imageReference"].includes(edge.targetHandle ?? ""),
+      );
+      if (hasFrameOrImageRef) return false;
+    } else {
+      // Connecting a frame/image-reference is blocked if a video is
+      // already connected.
+      const hasVideo = edgesOnTarget.some((edge) => edge.targetHandle === "video");
+      if (hasVideo) return false;
+    }
+  }
+
+  return true;
 }

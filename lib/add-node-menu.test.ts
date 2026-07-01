@@ -48,4 +48,11 @@ describe("add-node-menu", () => {
     expect(node.type).toBe("staticMediaReference");
     expect(node.data).toEqual({ asset: null });
   });
+
+  it("creates a Video Generation Node with an empty prompt and empty history", () => {
+    const node = createNodeAt("videoGeneration", { x: 0, y: 0 });
+
+    expect(node.type).toBe("videoGeneration");
+    expect(node.data).toEqual({ prompt: "", history: { entries: [], activeId: null } });
+  });
 });

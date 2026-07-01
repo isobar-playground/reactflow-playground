@@ -27,6 +27,7 @@ import {
   type StaticMediaReferenceNodeData,
 } from "@/components/nodes/static-media-reference-node";
 import { ImageGenerationNode } from "@/components/nodes/image-generation-node";
+import { VideoGenerationNode } from "@/components/nodes/video-generation-node";
 import { saveCanvasGraphAction } from "@/app/canvas-actions";
 import { debounce } from "@/lib/debounce";
 import { createNodeAt, shouldShowEmptyCanvasMenu, type NodeTypeKey } from "@/lib/add-node-menu";
@@ -40,6 +41,7 @@ const nodeTypes = {
   staticTextReference: StaticTextReferenceNode,
   staticMediaReference: StaticMediaReferenceNode,
   imageGeneration: ImageGenerationNode,
+  videoGeneration: VideoGenerationNode,
 };
 
 // A Static Media Reference's output type isn't fixed per node type (it's
@@ -106,6 +108,7 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
         sourceType: sourceNode.type as NodeTypeKey,
         sourceHandle: connection.sourceHandle ?? null,
         targetType: targetNode.type as NodeTypeKey,
+        targetId: targetNode.id,
         targetHandle: connection.targetHandle ?? null,
         existingEdges: edges.map((edge) => ({
           target: edge.target,

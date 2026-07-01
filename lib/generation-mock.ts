@@ -11,6 +11,16 @@ export interface ImagePlaceholderResult {
   url: string;
 }
 
+export interface VideoPlaceholderResult {
+  kind: "video";
+  url: string;
+}
+
+// Video Generation Node's mocked output (issue #11): a single bundled
+// looping sample mp4 served from /public — there's no per-generation
+// variation like picsum's random seed, since it's just a stand-in clip.
+const SAMPLE_VIDEO_URL = "/sample-video.mp4";
+
 function randomSeed(): string {
   return Math.random().toString(36).slice(2);
 }
@@ -26,5 +36,15 @@ export async function generateImagePlaceholder(): Promise<ImagePlaceholderResult
   return {
     kind: "image",
     url: `https://picsum.photos/seed/${randomSeed()}/${PLACEHOLDER_WIDTH}/${PLACEHOLDER_HEIGHT}`,
+  };
+}
+
+// Resolves after a short delay to the bundled looping sample mp4 (issue
+// #11's Video Generation Node placeholder output).
+export async function generateVideoPlaceholder(): Promise<VideoPlaceholderResult> {
+  await wait(GENERATION_DELAY_MS);
+  return {
+    kind: "video",
+    url: SAMPLE_VIDEO_URL,
   };
 }

@@ -11,6 +11,7 @@ function attempt(overrides: Partial<ConnectionAttempt>): ConnectionAttempt {
     sourceType: "staticTextReference",
     sourceHandle: null,
     targetType: "imageGeneration",
+    targetId: "gen1",
     targetHandle: "text",
     existingEdges: [],
     ...overrides,
@@ -138,5 +139,242 @@ describe("isConnectionAllowed", () => {
         }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("isConnectionAllowed — Video Generation Node handles (issue #11)", () => {
+  it("allows a Static Text Reference into the text handle", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticTextReference",
+          sourceHandle: null,
+          targetType: "videoGeneration",
+          targetHandle: "text",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("allows an image into the startFrame handle", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "image",
+          targetType: "videoGeneration",
+          targetHandle: "startFrame",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a second connection into the startFrame handle (accepts exactly one image)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "image",
+          targetType: "videoGeneration",
+          targetHandle: "startFrame",
+          existingEdges: [{ target: "gen1", targetHandle: "startFrame" }],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a second connection into the endFrame handle (accepts exactly one image)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "image",
+          targetType: "videoGeneration",
+          targetHandle: "endFrame",
+          existingEdges: [{ target: "gen1", targetHandle: "endFrame" }],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("allows many connections into the imageReference handle", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "image",
+          targetType: "videoGeneration",
+          targetHandle: "imageReference",
+          existingEdges: [
+            { target: "gen1", targetHandle: "imageReference" },
+            { target: "gen1", targetHandle: "imageReference" },
+          ],
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("allows a video into the video handle when nothing else is connected", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "video",
+          targetType: "videoGeneration",
+          targetHandle: "video",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a second connection into the video handle (accepts exactly one video)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "video",
+          targetType: "videoGeneration",
+          targetHandle: "video",
+          existingEdges: [{ target: "gen1", targetHandle: "video" }],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects connecting a video when a startFrame is already connected (video-exclusivity)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "video",
+          targetType: "videoGeneration",
+          targetHandle: "video",
+          existingEdges: [{ target: "gen1", targetHandle: "startFrame" }],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects connecting a video when an imageReference is already connected (video-exclusivity)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "video",
+          targetType: "videoGeneration",
+          targetHandle: "video",
+          existingEdges: [{ target: "gen1", targetHandle: "imageReference" }],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects connecting a startFrame when a video is already connected (video-exclusivity)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "image",
+          targetType: "videoGeneration",
+          targetHandle: "startFrame",
+          existingEdges: [{ target: "gen1", targetHandle: "video" }],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects connecting an endFrame when a video is already connected (video-exclusivity)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "image",
+          targetType: "videoGeneration",
+          targetHandle: "endFrame",
+          existingEdges: [{ target: "gen1", targetHandle: "video" }],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects connecting an imageReference when a video is already connected (video-exclusivity)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "image",
+          targetType: "videoGeneration",
+          targetHandle: "imageReference",
+          existingEdges: [{ target: "gen1", targetHandle: "video" }],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("still allows connecting text when a video is already connected", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticTextReference",
+          sourceHandle: null,
+          targetType: "videoGeneration",
+          targetHandle: "text",
+          existingEdges: [{ target: "gen1", targetHandle: "video" }],
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a video source into an unrelated node's video handle (existingEdges scoped by targetId)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "staticMediaReference",
+          sourceHandle: null,
+          sourceDataType: "video",
+          targetType: "videoGeneration",
+          targetId: "gen1",
+          targetHandle: "video",
+          existingEdges: [{ target: "gen2", targetHandle: "video" }],
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a video-gen output (video) into the imageReference handle (only images accepted)", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "videoGeneration",
+          sourceHandle: null,
+          targetType: "videoGeneration",
+          targetHandle: "imageReference",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("allows an Image Generation Node's output to chain into the startFrame handle", () => {
+    expect(
+      isConnectionAllowed(
+        attempt({
+          sourceType: "imageGeneration",
+          sourceHandle: null,
+          targetType: "videoGeneration",
+          targetHandle: "startFrame",
+        }),
+      ),
+    ).toBe(true);
   });
 });

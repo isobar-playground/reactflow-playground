@@ -43,6 +43,19 @@ describe("getActiveEntry", () => {
   });
 });
 
+describe("video outputs (issue #11)", () => {
+  it("accepts a video-kind output for a Video Generation Node's history entry", () => {
+    const videoEntry: HistoryEntry = {
+      id: "v1",
+      prompt: "a car driving",
+      output: { kind: "video", url: "/sample-video.mp4" },
+    };
+    const history = appendEntry(emptyHistory, videoEntry);
+
+    expect(getActiveEntry(history)).toEqual(videoEntry);
+  });
+});
+
 describe("history growth", () => {
   it("keeps every entry's own prompt independent of later entries", () => {
     let history = appendEntry(emptyHistory, entry("a", "a cat"));
