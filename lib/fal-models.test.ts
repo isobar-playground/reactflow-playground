@@ -7,18 +7,23 @@ import {
 } from "./fal-models";
 
 // A fake FAL entry as returned by GET /v1/models.
-function falEntry(overrides: Record<string, unknown> = {}) {
+function falEntry(
+  overrides: { endpoint_id?: string; metadata?: Record<string, unknown> } = {},
+) {
+  const { metadata, ...rest } = overrides;
   return {
     endpoint_id: "fal-ai/flux/dev",
-    status: "active",
+    ...rest,
+    // FAL nests the lifecycle `status` inside `metadata`, not at the top level.
     metadata: {
       display_name: "FLUX.1 [dev]",
       category: "text-to-image",
+      status: "active",
       description: "A fast text-to-image model.",
       tags: ["flux", "fast"],
       thumbnail_url: "https://fal.media/flux-dev.png",
+      ...metadata,
     },
-    ...overrides,
   };
 }
 
@@ -139,7 +144,10 @@ describe("fal-models catalog client", () => {
         {
           models: [
             falEntry({ endpoint_id: "fal-ai/live" }),
-            falEntry({ endpoint_id: "fal-ai/dead", status: "deprecated" }),
+            falEntry({
+              endpoint_id: "fal-ai/dead",
+              metadata: { status: "deprecated" },
+            }),
           ],
           next_cursor: null,
         },

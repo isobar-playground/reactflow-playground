@@ -37,11 +37,12 @@ export type ModelCategory = (typeof SURFACED_CATEGORIES)[number];
 // we intentionally ignore this step.
 interface FalModelEntry {
   endpoint_id: string;
-  status?: string;
   metadata?: {
     display_name?: string;
     category?: string;
     description?: string;
+    // FAL lifecycle status lives inside `metadata` (not top-level).
+    status?: string;
     tags?: string[];
     thumbnail_url?: string;
   };
@@ -53,7 +54,7 @@ interface FalModelsPage {
   has_more?: boolean;
 }
 
-const FAL_MODELS_URL = "https://fal.ai/api/v1/models";
+const FAL_MODELS_URL = "https://api.fal.ai/v1/models";
 const PAGE_LIMIT = 100;
 
 export interface ListModelsOptions {
@@ -113,7 +114,7 @@ async function fetchCategory(
     const page = (await response.json()) as FalModelsPage;
 
     for (const entry of page.models ?? []) {
-      if (entry.status !== "active") continue;
+      if (entry.metadata?.status !== "active") continue;
       if (entry.metadata?.category !== category) continue;
       models.push(toModel(entry, category));
     }
