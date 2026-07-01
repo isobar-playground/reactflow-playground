@@ -14,6 +14,7 @@ import {
   type Viewport,
   type ReactFlowJsonObject,
   type ReactFlowInstance,
+  type IsValidConnection,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import Link from "next/link";
@@ -25,6 +26,7 @@ import { ImageGenerationNode } from "@/components/nodes/image-generation-node";
 import { saveCanvasGraphAction } from "@/app/canvas-actions";
 import { debounce } from "@/lib/debounce";
 import { createNodeAt, shouldShowEmptyCanvasMenu, type NodeTypeKey } from "@/lib/add-node-menu";
+import { isConnectionAllowed } from "@/lib/connection-rules";
 import type { Canvas } from "@/lib/canvas-repo";
 
 const AUTOSAVE_DELAY_MS = 1500;
@@ -69,6 +71,31 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
       setNodes((current) => [...current, createNodeAt(type, position) as Node]);
     },
     [setNodes],
+  );
+
+  // connection-rules only knows about node/handle types, not React Flow's
+  // internal node ids, so this looks up each endpoint's type from current
+  // `nodes` before delegating the allow/deny decision (CONTEXT.md:
+  // disallowed edges rejected at connect time; References reject all
+  // inbound edges).
+  const isValidConnection: IsValidConnection = useCallback(
+    (connection) => {
+      const sourceNode = nodes.find((node) => node.id === connection.source);
+      const targetNode = nodes.find((node) => node.id === connection.target);
+      if (!sourceNode?.type || !targetNode?.type) return false;
+
+      return isConnectionAllowed({
+        sourceType: sourceNode.type as NodeTypeKey,
+        sourceHandle: connection.sourceHandle ?? null,
+        targetType: targetNode.type as NodeTypeKey,
+        targetHandle: connection.targetHandle ?? null,
+        existingEdges: edges.map((edge) => ({
+          target: edge.target,
+          targetHandle: edge.targetHandle ?? null,
+        })),
+      });
+    },
+    [nodes, edges],
   );
 
   function centreOfCanvas(): { x: number; y: number } {
@@ -151,6 +178,7 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
               onInit={setReactFlowInstance}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
+              isValidConnection={isValidConnection}
               onConnect={(connection: Connection) => {
                 setEdges((eds) => addEdge(connection, eds));
               }}

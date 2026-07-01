@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ReactFlow, ReactFlowProvider } from "@xyflow/react";
+import { ReactFlow, ReactFlowProvider, type Edge, type Node } from "@xyflow/react";
 import * as generationMock from "@/lib/generation-mock";
 import { ImageGenerationNode, type ImageGenerationNodeData } from "./image-generation-node";
+import { StaticTextReferenceNode } from "./static-text-reference-node";
 
-const nodeTypes = { imageGeneration: ImageGenerationNode };
+const nodeTypes = { imageGeneration: ImageGenerationNode, staticTextReference: StaticTextReferenceNode };
 
 function renderNode(
   data: ImageGenerationNodeData = { prompt: "", history: { entries: [], activeId: null } },
@@ -39,13 +40,11 @@ describe("ImageGenerationNode layout", () => {
     expect(screen.getByRole("button", { name: "Generate" })).toBeInTheDocument();
   });
 
-  it("renders exactly one handle, marked as a source (output only)", () => {
+  it("renders a source output handle", () => {
     const { container } = renderNode();
 
-    const handles = container.querySelectorAll(".react-flow__handle");
-    expect(handles).toHaveLength(1);
-    expect(handles[0]).toHaveClass("source");
-    expect(handles[0]).not.toHaveClass("target");
+    const sourceHandles = container.querySelectorAll(".react-flow__handle.source");
+    expect(sourceHandles).toHaveLength(1);
   });
 
   it("renders the decorative control chips", () => {
@@ -227,5 +226,94 @@ describe("ImageGenerationNode persistence", () => {
     const image = screen.getByRole("img", { name: /output/i });
     expect(image).toHaveAttribute("src", "https://picsum.photos/seed/xyz/768/768");
     expect(screen.getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
+  });
+});
+
+describe("ImageGenerationNode text handle and Resolved Prompt", () => {
+  function renderWithTextRef(nodes: Node[], edges: Edge[]) {
+    return render(
+      <ReactFlowProvider>
+        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} />
+      </ReactFlowProvider>,
+    );
+  }
+
+  it("renders a target text handle in addition to the source output handle", () => {
+    const { container } = renderNode();
+
+    const handles = container.querySelectorAll(".react-flow__handle");
+    expect(handles).toHaveLength(2);
+    const targetHandle = container.querySelector(".react-flow__handle.target");
+    expect(targetHandle).not.toBeNull();
+  });
+
+  it("shows the Resolved Prompt preview combining a connected Static Text Reference with the local prompt", () => {
+    const nodes: Node[] = [
+      {
+        id: "ref1",
+        type: "staticTextReference",
+        position: { x: 0, y: 0 },
+        initialWidth: 200,
+        initialHeight: 100,
+        data: { text: "a red car" },
+      },
+      {
+        id: "gen1",
+        type: "imageGeneration",
+        position: { x: 300, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: { prompt: "in a driveway", history: { entries: [], activeId: null } },
+      },
+    ];
+    const edges: Edge[] = [
+      {
+        id: "e1",
+        source: "ref1",
+        target: "gen1",
+        targetHandle: "text",
+      },
+    ];
+
+    renderWithTextRef(nodes, edges);
+
+    expect(screen.getByText("a red car in a driveway")).toBeInTheDocument();
+  });
+
+  it("concatenates multiple connected text references in edge order before the local prompt", () => {
+    const nodes: Node[] = [
+      {
+        id: "ref1",
+        type: "staticTextReference",
+        position: { x: 0, y: 0 },
+        initialWidth: 200,
+        initialHeight: 100,
+        data: { text: "a red car" },
+      },
+      {
+        id: "ref2",
+        type: "staticTextReference",
+        position: { x: 0, y: 200 },
+        initialWidth: 200,
+        initialHeight: 100,
+        data: { text: "a happy dog" },
+      },
+      {
+        id: "gen1",
+        type: "imageGeneration",
+        position: { x: 300, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: { prompt: "combined", history: { entries: [], activeId: null } },
+      },
+    ];
+    const edges: Edge[] = [
+      { id: "e1", source: "ref1", target: "gen1", targetHandle: "text" },
+      { id: "e2", source: "ref2", target: "gen1", targetHandle: "text" },
+    ];
+
+    renderWithTextRef(nodes, edges);
+
+    expect(screen.getByText("a red car a happy dog combined")).toBeInTheDocument();
   });
 });

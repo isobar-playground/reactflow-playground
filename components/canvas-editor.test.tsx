@@ -182,3 +182,66 @@ describe("CanvasEditor Image Generation Node from the menu", () => {
     expect(await screen.findByPlaceholderText(/prompt/i)).toBeInTheDocument();
   });
 });
+
+describe("CanvasEditor connection validation", () => {
+  it("rejects a connection into a Static Text Reference (references accept no inbound edges)", () => {
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "ref1",
+              type: "staticTextReference",
+              position: { x: 0, y: 0 },
+              data: { text: "hello" },
+            },
+            {
+              id: "ref2",
+              type: "staticTextReference",
+              position: { x: 300, y: 0 },
+              data: { text: "world" },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    // Static Text Reference has a source handle only, so there is no
+    // rendered target handle to drag onto — confirming, at the DOM level,
+    // that the structural absence backs the connection-rules rejection.
+    const targetHandles = container.querySelectorAll(
+      '.react-flow__node[data-id="ref2"] .react-flow__handle.target',
+    );
+    expect(targetHandles).toHaveLength(0);
+  });
+
+  it("allows connecting a Static Text Reference into an Image Generation Node's text handle", async () => {
+    render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "ref1",
+              type: "staticTextReference",
+              position: { x: 0, y: 0 },
+              data: { text: "a red car" },
+            },
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 400, y: 0 },
+              data: { prompt: "in a driveway", history: { entries: [], activeId: null } },
+            },
+          ],
+          edges: [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }],
+        })}
+      />,
+    );
+
+    // The saved edge round-tripped into React Flow's edge state and was
+    // picked up by the Image Generation Node's Resolved Prompt preview —
+    // proof the connection was accepted and consumed correctly.
+    expect(await screen.findByText("a red car in a driveway")).toBeInTheDocument();
+  });
+});

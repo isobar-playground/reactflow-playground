@@ -1,7 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
+import {
+  Handle,
+  Position,
+  useNodeConnections,
+  useNodesData,
+  type NodeProps,
+  type Node,
+} from "@xyflow/react";
 import { generateImagePlaceholder } from "@/lib/generation-mock";
 import {
   appendEntry,
@@ -9,6 +16,8 @@ import {
   getActiveEntry,
   type NodeHistory,
 } from "@/lib/node-history";
+import { resolvedPrompt } from "@/lib/resolved-prompt";
+import type { StaticTextReferenceNodeData } from "@/components/nodes/static-text-reference-node";
 
 export type ImageGenerationNodeData = {
   prompt: string;
@@ -23,16 +32,29 @@ export type ImageGenerationNodeType = Node<ImageGenerationNodeData, "imageGenera
 const DECORATIVE_CHIPS = ["1K", "1:1", "Light", "Style", "Camera"];
 
 // The core Generation Node (CONTEXT.md): a Generation Node with an output
-// handle and, later, named input handles (issue #8). This slice has no
-// inputs yet, only the local prompt field and a single output — so it has
-// an output handle and no input handle, like a Reference, but it also
-// produces (rather than just holds) data.
+// handle and named input handles. Issue #8 adds the `text` input handle,
+// which accepts Static Text References and feeds the Resolved Prompt
+// preview; the `image` handle and edit-mode switch are issue #10.
 export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeType>) {
   const [prompt, setPrompt] = useState(data.prompt);
   const [history, setHistory] = useState<NodeHistory>(data.history);
   const [isGenerating, setIsGenerating] = useState(false);
 
   const activeEntry = getActiveEntry(history);
+
+  // Resolved Prompt (CONTEXT.md): the text of all connected Static Text
+  // References, in edge order, concatenated with the local prompt field.
+  // useNodeConnections returns connections in edge order; useNodesData
+  // reads each connected node's live text so the preview updates as those
+  // nodes are edited.
+  const textConnections = useNodeConnections({ id, handleType: "target", handleId: "text" });
+  const connectedTextNodeIds = textConnections.map((connection) => connection.source);
+  const connectedTextNodes = useNodesData<Node<StaticTextReferenceNodeData>>(connectedTextNodeIds);
+  const connectedTextByNodeId = new Map(
+    connectedTextNodes.map((node) => [node.id, node.data.text]),
+  );
+  const connectedTexts = connectedTextNodeIds.map((nodeId) => connectedTextByNodeId.get(nodeId) ?? "");
+  const resolvedPromptText = resolvedPrompt(connectedTexts, prompt);
 
   // Every Generate/Regenerate appends a new History entry — even with an
   // unchanged prompt — and that entry becomes the Active Output (CONTEXT.md).
@@ -140,6 +162,15 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         data-node-id={id}
       />
 
+      {/* Resolved Prompt preview (CONTEXT.md): connected Static Text
+          References (edge order) concatenated with the local prompt. */}
+      {resolvedPromptText.length > 0 && (
+        <div className="mb-3 rounded-md border border-border bg-muted p-2 text-xs text-muted-foreground">
+          <div className="mb-1 font-medium">Resolved Prompt</div>
+          <div>{resolvedPromptText}</div>
+        </div>
+      )}
+
       <button
         type="button"
         onClick={handleGenerate}
@@ -149,6 +180,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
       </button>
 
+      <Handle type="target" position={Position.Left} id="text" />
       <Handle type="source" position={Position.Right} />
     </div>
   );
