@@ -2,11 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import * as libraryActions from "@/app/library-actions";
+import * as canvasActions from "@/app/canvas-actions";
 import { CanvasEditor } from "./canvas-editor";
 import type { Canvas } from "@/lib/canvas-repo";
 
 vi.mock("@/app/canvas-actions", () => ({
   saveCanvasGraphAction: vi.fn().mockResolvedValue(undefined),
+  renameCanvasAction: vi.fn().mockResolvedValue(undefined),
 }));
 
 function makeCanvas(graph: Record<string, unknown> = {}): Canvas {
@@ -176,6 +178,28 @@ describe("CanvasEditor persistence", () => {
       "src",
       "https://picsum.photos/seed/xyz/768/768",
     );
+  });
+});
+
+describe("CanvasEditor header rename (issue #21)", () => {
+  it("renames the canvas via the header: click, type, Enter persists and updates the header", async () => {
+    const user = userEvent.setup();
+    render(<CanvasEditor canvas={makeCanvas({ nodes: [], edges: [] })} />);
+
+    await user.click(screen.getByRole("button", { name: "Untitled" }));
+
+    const input = screen.getByRole("textbox", { name: "Canvas name" });
+    await user.clear(input);
+    await user.type(input, "My Renamed Canvas");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(canvasActions.renameCanvasAction).toHaveBeenCalledWith(
+        "canvas-1",
+        "My Renamed Canvas",
+      );
+    });
+    expect(await screen.findByRole("button", { name: "My Renamed Canvas" })).toBeInTheDocument();
   });
 });
 

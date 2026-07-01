@@ -30,7 +30,7 @@ import {
 import { ImageGenerationNode } from "@/components/nodes/image-generation-node";
 import { VideoGenerationNode } from "@/components/nodes/video-generation-node";
 import { DeletableEdge } from "@/components/edges/deletable-edge";
-import { saveCanvasGraphAction } from "@/app/canvas-actions";
+import { saveCanvasGraphAction, renameCanvasAction } from "@/app/canvas-actions";
 import { debounce } from "@/lib/debounce";
 import { createNodeAt, shouldShowEmptyCanvasMenu, NODE_TYPE_OPTIONS, type NodeTypeKey } from "@/lib/add-node-menu";
 import {
@@ -156,6 +156,13 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
   const [initialViewport] = useState<Viewport>(() => graphViewport(canvas));
   const viewportRef = useRef<Viewport>(initialViewport);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  // Header rename (issue #21): mirrors the canvas list's own inline-rename
+  // pattern (components/canvas-list.tsx) but keeps its own name state here so
+  // the header can show the new name immediately on save (optimistic, no
+  // reload) instead of waiting on the list page's revalidation.
+  const [renaming, setRenaming] = useState(false);
+  const [canvasName, setCanvasName] = useState(canvas.name);
+  const [nameDraft, setNameDraft] = useState(canvas.name);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   // The right-click point (in flow coordinates) the context menu should
   // spawn the chosen node at. Set on right-click, consumed and cleared by
@@ -367,13 +374,56 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
     void saveCanvasGraphAction(canvas.id, currentGraph()).then(() => setSaveState("saved"));
   }
 
+  // Header rename (issue #21): same rules as the canvas list's rename
+  // control — empty or unchanged (after trimming) is a no-op that just closes
+  // the field, otherwise it persists via the shared rename action and the
+  // header shows the new name right away (optimistic; no reload/refetch).
+  function submitRename() {
+    const trimmed = nameDraft.trim();
+    if (!trimmed || trimmed === canvasName) {
+      setNameDraft(canvasName);
+      setRenaming(false);
+      return;
+    }
+    setCanvasName(trimmed);
+    setRenaming(false);
+    void renameCanvasAction(canvas.id, trimmed);
+  }
+
   return (
     <div className="flex h-screen w-full flex-col">
       <header className="flex items-center gap-3 border-b border-border px-4 py-2">
         <Link href="/" className="text-sm text-muted-foreground hover:underline">
           &larr; All canvases
         </Link>
-        <h1 className="text-sm font-medium">{canvas.name}</h1>
+        {renaming ? (
+          <input
+            autoFocus
+            aria-label="Canvas name"
+            className="rounded-md border border-border bg-background px-2 py-1 text-sm font-medium"
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onBlur={submitRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submitRename();
+              if (e.key === "Escape") {
+                setNameDraft(canvasName);
+                setRenaming(false);
+              }
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            className="rounded-md px-2 py-1 text-sm font-medium hover:bg-muted"
+            onClick={() => {
+              setNameDraft(canvasName);
+              setRenaming(true);
+            }}
+          >
+            {canvasName}
+          </button>
+        )}
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-muted-foreground">
             {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}
