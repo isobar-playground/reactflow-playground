@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Position,
   useNodeConnections,
@@ -20,13 +21,26 @@ import {
   type NodeHistory,
 } from "@/lib/node-history";
 import { resolvedPrompt } from "@/lib/resolved-prompt";
-import { imageGenerationMode, imageGenerationModeLabel } from "@/lib/generation-mode";
+import { imageGenerationMode, imageGenerationModeLabel, modelCategoryLabel } from "@/lib/generation-mode";
 import { cloneVariants } from "@/lib/variant-clone";
+import { approvedModelsForKind } from "@/app/models-actions";
+import type { Model } from "@/lib/fal-models";
 import type { StaticTextReferenceNodeData } from "@/components/nodes/static-text-reference-node";
+
+// The Model recorded on a Generation Node once selected (CONTEXT.md's Model /
+// ADR-0007): just enough to show the picker's current value and drive the
+// node's label. Issue #30 adds the schema-derived `handles` snapshot
+// (ADR-0008) on top of this same field — not part of this slice.
+export type SelectedModel = {
+  endpointId: string;
+  name: string;
+  category: Model["category"];
+};
 
 export type ImageGenerationNodeData = {
   prompt: string;
   history: NodeHistory;
+  model?: SelectedModel | null;
 };
 
 export type ImageGenerationNodeType = Node<ImageGenerationNodeData, "imageGeneration">;
@@ -58,6 +72,24 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   const variantCount = Math.max(1, parseInt(variantCountInput, 10) || 1);
 
   const activeEntry = getActiveEntry(history);
+  const selectedModel = data.model;
+
+  // Model picker (CONTEXT.md's Model / issue #29): the picker's own list is
+  // just names/thumbnails from the live catalog joined against approvals —
+  // no per-model schema fetch here (that's issue #30, lazy at selection per
+  // ADR-0008). Fetched once per node mount; the picker only ever needs to
+  // show "Approved image-output Models," which doesn't change within a
+  // node's lifetime on the canvas.
+  const [approvedModels, setApprovedModels] = useState<Model[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void approvedModelsForKind("image").then((models) => {
+      if (!cancelled) setApprovedModels(models);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Resolved Prompt (CONTEXT.md): the text of all connected Static Text
   // References, in edge order, concatenated with the local prompt field.
@@ -73,11 +105,16 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   const connectedTexts = connectedTextNodeIds.map((nodeId) => connectedTextByNodeId.get(nodeId) ?? "");
   const resolvedPromptText = resolvedPrompt(connectedTexts, prompt);
 
-  // Mode (CONTEXT.md / issue #10): derived from whether any image is
-  // connected to the `image` handle — never chosen by hand.
+  // Label (CONTEXT.md's Model / ADR-0007, issue #29): once a Model is
+  // selected, its category is the node's label — a property of the chosen
+  // Model, not derived from connections. Falls back to the old
+  // connection-derived mode label (issue #10) only while no Model is chosen
+  // yet, so a fresh node still communicates something before its first pick.
   const imageConnections = useNodeConnections({ id, handleType: "target", handleId: "image" });
   const mode = imageGenerationMode(imageConnections.length > 0);
-  const modeLabel = imageGenerationModeLabel(mode);
+  const modeLabel = selectedModel
+    ? modelCategoryLabel(selectedModel.category)
+    : imageGenerationModeLabel(mode);
 
   const { getNode, getEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
   const { duplicate, remove } = useNodeActions(id);
@@ -232,7 +269,51 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
           onBlur={() => setVariantCountInput(String(variantCount))}
           className="nodrag w-16 rounded-md border border-border bg-background p-1 text-sm outline-none"
         />
+
+        {/* Model picker (CONTEXT.md's Model / issue #29): lists Approved
+            image-output Models only. Selecting one writes endpointId, name
+            and category through to data.model (ADR-0002) — handles aren't
+            derived yet (issue #30). */}
+        {approvedModels && approvedModels.length > 0 && (
+          <select
+            aria-label="Model"
+            className="nodrag flex-1 rounded-md border border-border bg-background p-1 text-sm outline-none"
+            value={selectedModel?.endpointId ?? ""}
+            onChange={(event) => {
+              const chosen = approvedModels.find((m) => m.endpointId === event.target.value);
+              updateNodeData(id, {
+                model: chosen
+                  ? { endpointId: chosen.endpointId, name: chosen.name, category: chosen.category }
+                  : null,
+              });
+            }}
+          >
+            <option value="">Select a model…</option>
+            {approvedModels.map((m) => (
+              <option key={m.endpointId} value={m.endpointId}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
+
+      {/* No-model / empty-picker states (issue #29): a fetched-but-empty
+          catalog points the author at /models rather than showing a picker
+          with nothing in it; otherwise, an unselected picker gets a plain
+          text nudge alongside the dropdown above. */}
+      {approvedModels && approvedModels.length === 0 && (
+        <p className="mb-3 text-xs text-muted-foreground">
+          No approved image models yet — approve one on{" "}
+          <Link href="/models" className="underline">
+            /models
+          </Link>
+          .
+        </p>
+      )}
+      {approvedModels && approvedModels.length > 0 && !selectedModel && (
+        <p className="mb-3 text-xs text-muted-foreground">Select a model to configure this node.</p>
+      )}
 
       <button
         type="button"

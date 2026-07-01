@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { filterModels } from "./model-filter";
+import { filterModels, modelsForKind } from "./model-filter";
 import type { Model } from "./fal-models";
 
 // A deliberately blank model so each query test isolates the one field it puts
@@ -138,6 +138,38 @@ describe("filterModels — sorting", () => {
     const dated = model({ endpointId: "dated", addedAt: "2026-01-01T00:00:00Z" });
     const undated = model({ endpointId: "undated" });
     expect(filterModels([undated, dated])).toEqual([dated, undated]);
+  });
+});
+
+describe("modelsForKind — output-modality grouping (PRD #28 item D)", () => {
+  it("keeps only image-output categories for kind 'image'", () => {
+    const textToImage = model({ endpointId: "a", category: "text-to-image" });
+    const imageToImage = model({ endpointId: "b", category: "image-to-image" });
+    const textToVideo = model({ endpointId: "c", category: "text-to-video" });
+
+    expect(modelsForKind([textToImage, imageToImage, textToVideo], "image")).toEqual([
+      textToImage,
+      imageToImage,
+    ]);
+  });
+
+  it("keeps only video-output categories for kind 'video'", () => {
+    const textToVideo = model({ endpointId: "a", category: "text-to-video" });
+    const imageToVideo = model({ endpointId: "b", category: "image-to-video" });
+    const videoToVideo = model({ endpointId: "c", category: "video-to-video" });
+    const textToImage = model({ endpointId: "d", category: "text-to-image" });
+
+    expect(modelsForKind([textToVideo, imageToVideo, videoToVideo, textToImage], "video")).toEqual([
+      textToVideo,
+      imageToVideo,
+      videoToVideo,
+    ]);
+  });
+
+  it("returns an empty list when nothing matches the kind", () => {
+    const textToVideo = model({ endpointId: "a", category: "text-to-video" });
+
+    expect(modelsForKind([textToVideo], "image")).toEqual([]);
   });
 });
 

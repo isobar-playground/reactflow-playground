@@ -64,6 +64,20 @@ function matchesApproval(approval: ApprovalFilter, isApproved: boolean): boolean
   return true;
 }
 
+// Output-modality grouping (ADR-0007, PRD #28 item D): which Approved Models
+// a Generation Node's Model picker offers is constrained by output kind, not
+// by a 1:1 category — an Image Generation Node offers both image-output
+// categories, a Video Generation Node all three video-output ones.
+const CATEGORIES_BY_KIND: Record<"image" | "video", ModelCategory[]> = {
+  image: ["text-to-image", "image-to-image"],
+  video: ["text-to-video", "image-to-video", "video-to-video"],
+};
+
+export function modelsForKind(models: Model[], kind: "image" | "video"): Model[] {
+  const categories = new Set<ModelCategory>(CATEGORIES_BY_KIND[kind]);
+  return models.filter((m) => categories.has(m.category));
+}
+
 function matchesQuery(model: Model, query: string): boolean {
   if (!query) return true;
   const haystack = [

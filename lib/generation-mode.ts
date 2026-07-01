@@ -1,7 +1,14 @@
+import type { ModelCategory } from "./fal-models";
+
 // generation-mode (CONTEXT.md / issue #10): a Generation Node's mode is
 // derived from which inputs are connected, never chosen by hand — the node
 // displays the resulting label. Image Gen: text only -> text->image; any
 // image present -> image->image (edit).
+//
+// Issue #29 (ADR-0007) inverts this for nodes with a selected Model: the
+// node's label becomes the Model's category, not a connection-derived mode
+// — see modelCategoryLabel below. This connection-derived mode/label stays
+// as the fallback for a node with no Model selected yet.
 
 export type ImageGenerationMode = "text-to-image" | "image-to-image";
 
@@ -41,4 +48,19 @@ const VIDEO_GENERATION_MODE_LABELS: Record<VideoGenerationMode, string> = {
 
 export function videoGenerationModeLabel(mode: VideoGenerationMode): string {
   return VIDEO_GENERATION_MODE_LABELS[mode];
+}
+
+// Model category label (CONTEXT.md's Model / issue #29): once a Model is
+// selected, the node's label is the chosen Model's category — a property of
+// the Model, never derived from which inputs are connected (ADR-0007).
+const MODEL_CATEGORY_LABELS: Record<ModelCategory, string> = {
+  "text-to-image": "Text → Image",
+  "image-to-image": "Image → Image",
+  "text-to-video": "Text → Video",
+  "image-to-video": "Image → Video",
+  "video-to-video": "Video → Video",
+};
+
+export function modelCategoryLabel(category: ModelCategory): string {
+  return MODEL_CATEGORY_LABELS[category];
 }

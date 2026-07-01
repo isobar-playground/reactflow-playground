@@ -11,9 +11,15 @@ import {
   type Node,
 } from "@xyflow/react";
 import * as generationMock from "@/lib/generation-mock";
+import * as modelsActions from "@/app/models-actions";
 import { ImageGenerationNode, type ImageGenerationNodeData } from "./image-generation-node";
 import { StaticTextReferenceNode } from "./static-text-reference-node";
 import { StaticMediaReferenceNode } from "./static-media-reference-node";
+import type { Model } from "@/lib/fal-models";
+
+vi.mock("@/app/models-actions", () => ({
+  approvedModelsForKind: vi.fn().mockResolvedValue([]),
+}));
 
 const nodeTypes = {
   imageGeneration: ImageGenerationNode,
@@ -733,5 +739,164 @@ describe("ImageGenerationNode mode (issue #10)", () => {
     renderWithNodes(nodes, edges);
 
     expect(screen.getByText("Text → Image")).toBeInTheDocument();
+  });
+});
+
+describe("ImageGenerationNode Model picker (issue #29)", () => {
+  const flux: Model = {
+    endpointId: "fal-ai/flux/dev",
+    name: "FLUX.1 [dev]",
+    category: "text-to-image",
+    description: "",
+    tags: [],
+  };
+  const editModel: Model = {
+    endpointId: "fal-ai/edit/model",
+    name: "Edit Model",
+    category: "image-to-image",
+    description: "",
+    tags: [],
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("lists only Approved image-output Models fetched via approvedModelsForKind", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([flux, editModel]);
+    renderNode();
+
+    expect(modelsActions.approvedModelsForKind).toHaveBeenCalledWith("image");
+    expect(await screen.findByRole("option", { name: "FLUX.1 [dev]" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Edit Model" })).toBeInTheDocument();
+  });
+
+  it("shows a 'select a model' state before a Model is chosen", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([flux]);
+    renderNode();
+
+    await screen.findByRole("option", { name: "FLUX.1 [dev]" });
+    expect(screen.getByText(/select a model to configure/i)).toBeInTheDocument();
+  });
+
+  it("shows an empty hint pointing at /models when there are no Approved image Models", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([]);
+    renderNode();
+
+    const hint = await screen.findByText(/no approved.*models/i);
+    expect(hint).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /models/i });
+    expect(link).toHaveAttribute("href", "/models");
+  });
+
+  it("selecting a Model stores endpointId, name and category in node data via updateNodeData", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([flux, editModel]);
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "", history: { entries: [], activeId: null } },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    await screen.findByRole("option", { name: "FLUX.1 [dev]" });
+    const picker = screen.getByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/flux/dev");
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
+      expect(data.model).toEqual({
+        endpointId: "fal-ai/flux/dev",
+        name: "FLUX.1 [dev]",
+        category: "text-to-image",
+      });
+    });
+  });
+
+  it("shows the selected Model's category as the node's label instead of the connection-derived mode", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([flux, editModel]);
+    const user = userEvent.setup();
+    renderNode();
+
+    await screen.findByRole("option", { name: "FLUX.1 [dev]" });
+    expect(screen.getByText("Text → Image")).toBeInTheDocument();
+
+    const picker = screen.getByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/edit/model");
+
+    await waitFor(() => {
+      expect(screen.getByText("Image → Image")).toBeInTheDocument();
+    });
+  });
+
+  it("restores a saved Model selection on reload without refetching the picker's answer", () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([flux]);
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: { endpointId: "fal-ai/flux/dev", name: "FLUX.1 [dev]", category: "text-to-image" },
+    });
+
+    expect(screen.getByText("Text → Image")).toBeInTheDocument();
+    expect(screen.queryByText(/select a model/i)).not.toBeInTheDocument();
+  });
+
+  it("preserves the selected Model when the node is cloned as a Variant", async () => {
+    vi.spyOn(generationMock, "generateImagePlaceholder").mockResolvedValue({
+      kind: "image",
+      url: "https://picsum.photos/seed/c1/768/768",
+    });
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([flux]);
+    const user = userEvent.setup();
+    renderInCanvas([
+      {
+        id: "n1",
+        type: "imageGeneration",
+        position: { x: 0, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: {
+          prompt: "",
+          history: { entries: [], activeId: null },
+          model: { endpointId: "fal-ai/flux/dev", name: "FLUX.1 [dev]", category: "text-to-image" },
+        },
+      },
+    ]);
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "2");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(2);
+    });
+    const labels = screen.getAllByText("Text → Image");
+    expect(labels).toHaveLength(2);
   });
 });
