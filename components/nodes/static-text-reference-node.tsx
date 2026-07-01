@@ -2,6 +2,8 @@
 
 import { Position, useReactFlow, type NodeProps, type Node } from "@xyflow/react";
 import { HandleBadge } from "@/components/nodes/handle-badge";
+import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
+import { useNodeActions } from "@/components/nodes/use-node-actions";
 
 export type StaticTextReferenceNodeData = {
   text: string;
@@ -19,10 +21,14 @@ export type StaticTextReferenceNodeType = Node<StaticTextReferenceNodeData, "sta
 // Generation Node's Resolved Prompt.
 export function StaticTextReferenceNode({ id, data }: NodeProps<StaticTextReferenceNodeType>) {
   const { updateNodeData } = useReactFlow();
+  const { duplicate, remove } = useNodeActions(id);
 
   return (
     <div className="w-64 rounded-lg border border-border bg-card p-3 shadow-sm">
-      <div className="mb-2 text-xs font-medium text-muted-foreground">Static Text Reference</div>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">Static Text Reference</span>
+        <NodeActionsMenu onDuplicate={duplicate} onDelete={remove} />
+      </div>
       <textarea
         className="nodrag w-full resize-none rounded-md border border-border bg-background p-2 text-sm outline-none"
         rows={4}

@@ -399,6 +399,7 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
                 setEdges((eds) => addEdge(connection, eds));
               }}
               onConnectEnd={onConnectEnd}
+              deleteKeyCode={["Backspace", "Delete"]}
               onMoveEnd={(_, viewport) => {
                 viewportRef.current = viewport;
                 persist(currentGraph());

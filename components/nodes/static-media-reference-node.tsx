@@ -17,6 +17,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { HandleBadge } from "@/components/nodes/handle-badge";
+import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
+import { useNodeActions } from "@/components/nodes/use-node-actions";
 import { listAssetsAction, uploadAssetAction } from "@/app/library-actions";
 import type { Asset } from "@/lib/asset-library";
 
@@ -50,6 +52,7 @@ export type StaticMediaReferenceNodeType = Node<StaticMediaReferenceNodeData, "s
 // never reach Vercel Blob since BLOB_READ_WRITE_TOKEN is server-only.
 export function StaticMediaReferenceNode({ id, data }: NodeProps<StaticMediaReferenceNodeType>) {
   const { updateNodeData } = useReactFlow();
+  const { duplicate, remove } = useNodeActions(id);
   const updateNodeInternals = useUpdateNodeInternals();
   // pickerOpen and stickyTypeHint always change together (see the
   // forced-open effect below), so they're one state value updated in a
@@ -101,7 +104,10 @@ export function StaticMediaReferenceNode({ id, data }: NodeProps<StaticMediaRefe
 
   return (
     <div className="w-64 rounded-lg border border-border bg-card p-3 shadow-sm" data-node-id={id}>
-      <div className="mb-2 text-xs font-medium text-muted-foreground">Static Media Reference</div>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">Static Media Reference</span>
+        <NodeActionsMenu onDuplicate={duplicate} onDelete={remove} />
+      </div>
 
       {asset ? (
         <div className="mb-2 overflow-hidden rounded-md bg-muted">

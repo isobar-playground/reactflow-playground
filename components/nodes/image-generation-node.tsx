@@ -10,6 +10,8 @@ import {
   type Node,
 } from "@xyflow/react";
 import { HandleBadge } from "@/components/nodes/handle-badge";
+import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
+import { useNodeActions } from "@/components/nodes/use-node-actions";
 import { generateImagePlaceholder } from "@/lib/generation-mock";
 import {
   appendEntry,
@@ -83,6 +85,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   const modeLabel = imageGenerationModeLabel(mode);
 
   const { getNode, getEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
+  const { duplicate, remove } = useNodeActions(id);
 
   // Variant cloning (CONTEXT.md / issue #12): when the counter is above one,
   // Generate adds (count - 1) sibling clones beside this node instead of
@@ -153,9 +156,12 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
     <div className="w-96 rounded-xl border border-border bg-card p-3 shadow-sm" data-node-id={id}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">Image Generation Node</span>
-        <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-          {modeLabel}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+            {modeLabel}
+          </span>
+          <NodeActionsMenu onDuplicate={duplicate} onDelete={remove} />
+        </div>
       </div>
 
       {/* Output box: only takes up space once there's something to show —

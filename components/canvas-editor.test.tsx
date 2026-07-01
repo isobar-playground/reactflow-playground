@@ -402,3 +402,146 @@ describe("CanvasEditor drag-to-spawn (Handle-Spawned Node, issue #17)", () => {
     });
   });
 });
+
+describe("CanvasEditor node actions menu (delete/duplicate)", () => {
+  it("shows Duplicate and Delete when a node's actions button is opened", async () => {
+    const user = userEvent.setup();
+    render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [{ id: "n1", type: "staticTextReference", position: { x: 0, y: 0 }, data: { text: "hi" } }],
+          edges: [],
+        })}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Node actions" }));
+
+    expect(await screen.findByRole("menuitem", { name: "Duplicate" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+  });
+
+  it("duplicates a node, keeping its data but placing it at a new position", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [{ id: "n1", type: "staticTextReference", position: { x: 0, y: 0 }, data: { text: "hello" } }],
+          edges: [],
+        })}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Node actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Duplicate" }));
+
+    expect(await screen.findAllByPlaceholderText("Enter text…")).toHaveLength(2);
+    expect(container.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(2);
+  });
+
+  it("deletes a node via its actions menu, taking its connected edge with it", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            { id: "ref1", type: "staticTextReference", position: { x: 0, y: 0 }, data: { text: "a red car" } },
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 400, y: 0 },
+              data: { prompt: "in a driveway", history: { entries: [], activeId: null } },
+            },
+          ],
+          edges: [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }],
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("a red car in a driveway")).toBeInTheDocument();
+
+    const refNode = container.querySelector('.react-flow__node[data-id="ref1"]') as HTMLElement;
+    await user.click(within(refNode).getByRole("button", { name: "Node actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(container.querySelector('.react-flow__node[data-id="ref1"]')).not.toBeInTheDocument();
+      expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(0);
+    });
+  });
+});
+
+describe("CanvasEditor edge deletion between any node types", () => {
+  it("removes an edge between a Reference and a Generation Node via select + Delete", async () => {
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            { id: "ref1", type: "staticTextReference", position: { x: 0, y: 0 }, data: { text: "a red car" } },
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 400, y: 0 },
+              data: { prompt: "in a driveway", history: { entries: [], activeId: null } },
+            },
+          ],
+          edges: [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }],
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("a red car in a driveway")).toBeInTheDocument();
+
+    const edgeElement = container.querySelector(".react-flow__edge") as HTMLElement;
+    fireEvent.click(edgeElement);
+    // "Delete" (forward-delete), not just Backspace — deleteKeyCode covers
+    // both so Windows-standard Delete works, not only Backspace.
+    fireEvent.keyDown(edgeElement, { key: "Delete", code: "Delete" });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(0);
+    });
+  });
+
+  it("removes an edge between two Generation Nodes (image output chained into another Image Generation Node) via select + Delete", async () => {
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 0, y: 0 },
+              data: {
+                prompt: "a cat",
+                history: {
+                  entries: [{ id: "h1", prompt: "a cat", output: { kind: "image", url: "https://picsum.photos/seed/h1/768/768" } }],
+                  activeId: "h1",
+                },
+              },
+            },
+            {
+              id: "gen2",
+              type: "imageGeneration",
+              position: { x: 400, y: 0 },
+              data: { prompt: "edited", history: { entries: [], activeId: null } },
+            },
+          ],
+          edges: [{ id: "e1", source: "gen1", target: "gen2", targetHandle: "image" }],
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(1);
+    });
+
+    const edgeElement = container.querySelector(".react-flow__edge") as HTMLElement;
+    fireEvent.click(edgeElement);
+    fireEvent.keyDown(edgeElement, { key: "Delete", code: "Delete" });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(0);
+    });
+  });
+});
