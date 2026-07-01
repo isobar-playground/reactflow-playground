@@ -308,6 +308,119 @@ describe("ImageGenerationNode persistence", () => {
       expect((getNodeRef?.("n1")?.data as ImageGenerationNodeData).prompt).toBe("a cat");
     });
   });
+
+  // ADR-0002 / issue #16: History and the Active Output must live in
+  // `data.history`, not local component state, or they vanish on reload.
+  // Verified via getNode(id), not the DOM alone.
+  it("writes a generated History entry through to node data", async () => {
+    vi.spyOn(generationMock, "generateImagePlaceholder").mockResolvedValue({
+      kind: "image",
+      url: "https://picsum.photos/seed/abc/768/768",
+    });
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "a cat", history: { entries: [], activeId: null } },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await screen.findByRole("img", { name: /output/i });
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
+      expect(data.history.entries).toHaveLength(1);
+      expect(data.history.activeId).toBe(data.history.entries[0].id);
+      expect(data.history.entries[0].output.url).toBe("https://picsum.photos/seed/abc/768/768");
+    });
+  });
+
+  it("writes the restored prompt and activeId through to node data when selecting an older History entry", async () => {
+    vi.spyOn(generationMock, "generateImagePlaceholder")
+      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/a/768/768" })
+      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/b/768/768" });
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "", history: { entries: [], activeId: null } },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    const promptField = screen.getByPlaceholderText(/prompt/i);
+    await user.type(promptField, "first prompt");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await screen.findByRole("img", { name: /output/i });
+
+    await user.clear(promptField);
+    await user.type(promptField, "second prompt");
+    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
+      expect(data.history.entries).toHaveLength(2);
+    });
+
+    const thumbnails = screen.getAllByRole("img", { name: /history entry/i });
+    await user.click(thumbnails[0]);
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
+      expect(data.prompt).toBe("first prompt");
+      expect(data.history.activeId).toBe(data.history.entries[0].id);
+      expect(data.history.entries).toHaveLength(2);
+    });
+  });
 });
 
 describe("ImageGenerationNode text handle and Resolved Prompt", () => {

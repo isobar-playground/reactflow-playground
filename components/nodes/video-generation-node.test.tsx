@@ -444,4 +444,122 @@ describe("VideoGenerationNode persistence", () => {
       expect((getNodeRef?.("n1")?.data as VideoGenerationNodeData).prompt).toBe("driving fast");
     });
   });
+
+  // ADR-0002 / issue #16: History and the Active Output must live in
+  // `data.history`, not local component state, or they vanish on reload.
+  // Verified via getNode(id), not the DOM alone.
+  it("writes a generated History entry through to node data", async () => {
+    vi.spyOn(generationMock, "generateVideoPlaceholder").mockResolvedValue({
+      kind: "video",
+      url: "/sample-video.mp4",
+    });
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "driving fast", history: { entries: [], activeId: null } },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.history.entries).toHaveLength(1);
+      expect(data.history.activeId).toBe(data.history.entries[0].id);
+      expect(data.history.entries[0].output.url).toBe("/sample-video.mp4");
+    });
+  });
+
+  it("writes the restored prompt and activeId through to node data when selecting an older History entry", async () => {
+    vi.spyOn(generationMock, "generateVideoPlaceholder")
+      .mockResolvedValueOnce({ kind: "video", url: "/sample-video-a.mp4" })
+      .mockResolvedValueOnce({ kind: "video", url: "/sample-video-b.mp4" });
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "", history: { entries: [], activeId: null } },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    const promptField = screen.getByPlaceholderText(/prompt/i);
+    await user.type(promptField, "first prompt");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.history.entries).toHaveLength(1);
+    });
+
+    await user.clear(promptField);
+    await user.type(promptField, "second prompt");
+    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.history.entries).toHaveLength(2);
+    });
+
+    // Video History thumbnails render as <video>, not <img> — query by the
+    // history carousel container instead of the img role.
+    const historyButtons = screen.getAllByRole("button").filter((btn) =>
+      btn.querySelector("video"),
+    );
+    await user.click(historyButtons[0]);
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.prompt).toBe("first prompt");
+      expect(data.history.activeId).toBe(data.history.entries[0].id);
+      expect(data.history.entries).toHaveLength(2);
+    });
+  });
 });

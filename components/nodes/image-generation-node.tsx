@@ -41,15 +41,15 @@ const DECORATIVE_CHIPS = ["1K", "1:1", "Light", "Style", "Camera"];
 // label — the mode is never chosen by hand, only computed from whether any
 // image is connected.
 //
-// ADR-0002: the prompt field is controlled from `data.prompt` and writes
-// through with updateNodeData on every change rather than shadowing it in
-// local state — otherwise it never reaches autosave or the Resolved Prompt
-// a downstream node reads via useNodesData. History still starts from
-// `data.history` for the restore-from-data path but stays local afterward,
-// matching the existing Generate/Regenerate/variant-clone flow.
+// ADR-0002: the prompt field and History are both controlled from `data`
+// and write through with updateNodeData on every change rather than
+// shadowing them in local state — otherwise neither reaches autosave, and a
+// downstream node's useNodesData read of the Active Output (or the Resolved
+// Prompt) would go stale. Only the in-progress `isGenerating` flag is
+// transient UI state and stays local (issue #16).
 export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeType>) {
   const prompt = data.prompt;
-  const [history, setHistory] = useState<NodeHistory>(data.history);
+  const history = data.history;
   const [isGenerating, setIsGenerating] = useState(false);
   // Variant counter (CONTEXT.md / issue #12): above one, Generate clones this
   // node into that many independent nodes instead of appending to its own
@@ -124,6 +124,8 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
 
   // Every Generate/Regenerate appends a new History entry — even with an
   // unchanged prompt — and that entry becomes the Active Output (CONTEXT.md).
+  // ADR-0002 / issue #16: written through to data.history so it survives
+  // reload and stays visible to downstream consumers of the Active Output.
   async function handleGenerate() {
     if (variantCount > 1) {
       await handleGenerateVariants(variantCount);
@@ -131,19 +133,19 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
     }
     setIsGenerating(true);
     const result = await generateImagePlaceholder();
-    setHistory((current) =>
-      appendEntry(current, { id: crypto.randomUUID(), prompt, output: result }),
-    );
+    updateNodeData(id, {
+      history: appendEntry(history, { id: crypto.randomUUID(), prompt, output: result }),
+    });
     setIsGenerating(false);
   }
 
   // Selecting a History thumbnail sets the Active Output and restores that
-  // entry's prompt into the field. It never triggers regeneration.
+  // entry's prompt into the field. It never triggers regeneration — a pure
+  // pointer swap written through to data (ADR-0002 / issue #16).
   function handleSelectHistoryEntry(entryId: string) {
     const selected = history.entries.find((entry) => entry.id === entryId);
     if (!selected) return;
-    setHistory((current) => setActiveEntry(current, entryId));
-    updateNodeData(id, { prompt: selected.prompt });
+    updateNodeData(id, { history: setActiveEntry(history, entryId), prompt: selected.prompt });
   }
 
   return (
