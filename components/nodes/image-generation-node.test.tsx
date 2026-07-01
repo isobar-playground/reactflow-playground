@@ -82,14 +82,6 @@ describe("ImageGenerationNode layout", () => {
     expect(sourceHandles).toHaveLength(1);
   });
 
-  it("renders the decorative control chips", () => {
-    renderNode();
-
-    for (const label of ["1K", "1:1", "Light", "Style", "Camera"]) {
-      expect(screen.getByText(label)).toBeInTheDocument();
-    }
-  });
-
   it("lets the user type into the prompt field", async () => {
     const user = userEvent.setup();
     renderNode();
@@ -100,16 +92,6 @@ describe("ImageGenerationNode layout", () => {
     expect(prompt).toHaveValue("a cat");
   });
 
-  it("decorative chips are inert: clicking them has no visible effect", async () => {
-    const user = userEvent.setup();
-    renderNode();
-
-    const chip = screen.getByText("1K");
-    await user.click(chip);
-
-    // Still present, unchanged, no crash / no new UI appeared.
-    expect(screen.getByText("1K")).toBeInTheDocument();
-  });
 });
 
 describe("ImageGenerationNode generation", () => {

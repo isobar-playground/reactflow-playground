@@ -31,11 +31,6 @@ export type ImageGenerationNodeData = {
 
 export type ImageGenerationNodeType = Node<ImageGenerationNodeData, "imageGeneration">;
 
-// Decorative-only chips from the reference screenshot (PRD story #60): they
-// render to match the look but are intentionally inert — no state, no
-// handlers beyond swallowing the click.
-const DECORATIVE_CHIPS = ["1K", "1:1", "Light", "Style", "Camera"];
-
 // The core Generation Node (CONTEXT.md): a Generation Node with an output
 // handle and named input handles. Issue #8 adds the `text` input handle,
 // which accepts Static Text References and feeds the Resolved Prompt
@@ -204,40 +199,6 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
           ))}
         </div>
       )}
-
-      <div className="mb-3 flex flex-wrap gap-1.5">
-        {DECORATIVE_CHIPS.map((label) => (
-          <button
-            key={label}
-            type="button"
-            disabled
-            className="nodrag rounded-full border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground"
-          >
-            {label}
-          </button>
-        ))}
-        <button
-          type="button"
-          disabled
-          className="nodrag rounded-full border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground"
-        >
-          Model
-        </button>
-        <button
-          type="button"
-          disabled
-          className="nodrag rounded-full border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground"
-        >
-          Credits
-        </button>
-        <button
-          type="button"
-          disabled
-          className="nodrag rounded-full border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground"
-        >
-          Settings
-        </button>
-      </div>
 
       <textarea
         className="nodrag mb-3 w-full resize-none rounded-md border border-border bg-background p-2 text-sm outline-none"
