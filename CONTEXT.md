@@ -16,7 +16,7 @@ A single shared collection of uploaded files (stored in Vercel Blob), from which
 _Avoid_: Media library, gallery, uploads
 
 **Static Media Reference**:
-A Reference that holds a single asset (image or video) chosen from the Asset Library. The media type is inferred from the file. No prompt, no generation.
+A Reference that holds a single asset (image or video) chosen from the Asset Library. The media type is inferred from the file. No prompt, no generation. Unlike a Static Text Reference, its output data type is not fixed — it is unknown until an asset is chosen. Until then it has no connectable output at all (it isn't a Reference yet, in the sense of having data to provide); its Asset Picker can be given a **type hint** (see Handle-Spawned Node) to restrict the choice to one media type.
 _Avoid_: Static Image Reference, Static Video Reference
 
 **Static Text Reference**:
@@ -46,6 +46,10 @@ The currently-selected History entry of a Generation Node. It is what the node d
 When a Generation Node's variant count is set above one and generation is triggered, the node clones itself into that many independent nodes. Each clone inherits the incoming reference edges of the original.
 _Avoid_: Copy, duplicate
 
+**Handle-Spawned Node**:
+A node created by dragging from an existing node's handle and dropping on empty canvas, rather than from the right-click menu. The picker offered is filtered to only the node types that would form a valid connection at that handle (per Connection rules), and the new node is auto-connected to the handle it was dragged from. When a Generation Node has more than one input handle accepting the dragged data type (e.g. Video Generation Node's `start frame`/`end frame`/`image reference` all accept image), the first such handle in the node's declared order is used. The exception is a Static Media Reference: it has no output until an asset is chosen (ADR-0003), so picking it opens its Asset Picker immediately with a type hint restricting the choice to the dragged handle's data type, and the edge is created only once an asset is picked — not at spawn time. Cancelling that picker leaves the node on the canvas, unconnected.
+_Avoid_: Quick-add node, drag-to-create
+
 ## Connection rules
 
 A directed edge means "the source's output feeds a specific input handle of the target".
@@ -53,6 +57,7 @@ A directed edge means "the source's output feeds a specific input handle of the 
 - References have an output handle only — nothing can connect *into* a Reference.
 - Generation Nodes have an output handle and several **named, typed input handles** (below). Outputs may chain into further Generation Nodes.
 - Connections are validated by the data type accepted at each handle; disallowed edges are rejected at connect time. A node feeding a downstream consumer provides its Active Output.
+- A Static Media Reference has no connectable output until an asset is chosen — its data type isn't known before then (ADR-0003).
 
 **Image Generation Node — input handles:**
 - `text` — accepts Static Text References (many; concatenated into the Resolved Prompt).
