@@ -1,13 +1,51 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ReactFlow, ReactFlowProvider } from "@xyflow/react";
+import {
+  ReactFlow,
+  ReactFlowProvider,
+  useNodesState,
+  useEdgesState,
+  type Edge,
+  type Node,
+} from "@xyflow/react";
 import { StaticTextReferenceNode } from "./static-text-reference-node";
+import { ImageGenerationNode } from "./image-generation-node";
 
-const nodeTypes = { staticTextReference: StaticTextReferenceNode };
+const nodeTypes = {
+  staticTextReference: StaticTextReferenceNode,
+  imageGeneration: ImageGenerationNode,
+};
+
+// Node data write-through (ADR-0002) only round-trips back into a controlled
+// input when React Flow's nodes/edges are owned by useNodesState/
+// useEdgesState with onNodesChange/onEdgesChange wired through — the same
+// way components/canvas-editor.tsx wires the real canvas. A static
+// `nodes={[...]}` literal has nowhere for an internal updateNodeData change
+// to flow back to, so it can't observe write-through.
+function renderInCanvas(initialNodes: Node[], initialEdges: Edge[] = []) {
+  function TestCanvas() {
+    const [nodes, , onNodesChange] = useNodesState<Node>(initialNodes);
+    const [edges, , onEdgesChange] = useEdgesState<Edge>(initialEdges);
+    return (
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+      />
+    );
+  }
+  return render(
+    <ReactFlowProvider>
+      <TestCanvas />
+    </ReactFlowProvider>,
+  );
+}
 
 function renderNode(data: { text: string } = { text: "" }) {
-  const nodes = [
+  return renderInCanvas([
     {
       id: "n1",
       type: "staticTextReference",
@@ -19,12 +57,7 @@ function renderNode(data: { text: string } = { text: "" }) {
       initialHeight: 100,
       data,
     },
-  ];
-  return render(
-    <ReactFlowProvider>
-      <ReactFlow nodes={nodes} edges={[]} nodeTypes={nodeTypes} />
-    </ReactFlowProvider>,
-  );
+  ]);
 }
 
 describe("StaticTextReferenceNode", () => {
@@ -51,5 +84,46 @@ describe("StaticTextReferenceNode", () => {
     await user.type(textarea, "abc");
 
     expect(textarea).toHaveValue("abc");
+  });
+
+  // ADR-0002: node data is the single source of truth for persisted canvas
+  // content. Typing must write through to the node's `data.text`, not just
+  // local component state — verified here through a downstream consumer
+  // (a connected Image Generation Node's Resolved Prompt reads
+  // useNodesData(...).data.text), the same way a reload or another node
+  // would observe it, rather than asserting on the DOM value alone.
+  it("writes typed text through to node data, observable by a connected consumer", async () => {
+    const user = userEvent.setup();
+    const nodes: Node[] = [
+      {
+        id: "ref1",
+        type: "staticTextReference",
+        position: { x: 0, y: 0 },
+        initialWidth: 200,
+        initialHeight: 100,
+        data: { text: "" },
+      },
+      {
+        id: "gen1",
+        type: "imageGeneration",
+        position: { x: 300, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: { prompt: "", history: { entries: [], activeId: null } },
+      },
+    ];
+    const edges: Edge[] = [
+      { id: "e1", source: "ref1", target: "gen1", targetHandle: "text" },
+    ];
+
+    renderInCanvas(nodes, edges);
+
+    const textarea = screen.getByPlaceholderText("Enter text…");
+    await user.type(textarea, "a red car");
+
+    const gen1Container = document.querySelector('[data-node-id="gen1"]') as HTMLElement;
+    await waitFor(() => {
+      expect(within(gen1Container).getByText("a red car")).toBeInTheDocument();
+    });
   });
 });

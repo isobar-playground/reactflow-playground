@@ -35,8 +35,13 @@ export type VideoGenerationNodeType = Node<VideoGenerationNodeData, "videoGenera
 // `video` (one video, mutually exclusive with the other three — enforced by
 // lib/connection-rules.ts). Mode is derived, never chosen by hand, mirroring
 // the Image Generation Node's pattern (components/nodes/image-generation-node.tsx).
+//
+// ADR-0002: the prompt field is controlled from `data.prompt` and writes
+// through with updateNodeData on every change rather than shadowing it in
+// local state — otherwise it never reaches autosave or the Resolved Prompt
+// a downstream node reads via useNodesData.
 export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeType>) {
-  const [prompt, setPrompt] = useState(data.prompt);
+  const prompt = data.prompt;
   const [history, setHistory] = useState<NodeHistory>(data.history);
   const [isGenerating, setIsGenerating] = useState(false);
   // Variant counter (CONTEXT.md / issue #12): above one, Generate clones this
@@ -79,7 +84,7 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
   const mode = videoGenerationMode({ hasImageInput, hasVideo: videoConnections.length > 0 });
   const modeLabel = videoGenerationModeLabel(mode);
 
-  const { getNode, getEdges, addNodes, addEdges } = useReactFlow();
+  const { getNode, getEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
 
   // Variant cloning (CONTEXT.md / issue #12): when the counter is above one,
   // Generate clones this node into that many independent nodes instead of
@@ -88,6 +93,10 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
   // generates its own single fresh output — never a copy of this node's
   // History. The counter resets to 1 afterward. Mirrors
   // components/nodes/image-generation-node.tsx's handleGenerateVariants.
+  //
+  // ADR-0002: getNode(id) already returns the live `data.prompt` — the
+  // prompt field writes through on every keystroke — so no manual merge of
+  // the local prompt into the cloned node's data is needed here.
   async function handleGenerateVariants(count: number) {
     setIsGenerating(true);
     const node = getNode(id);
@@ -95,11 +104,7 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
       setIsGenerating(false);
       return;
     }
-    const { nodes: clones, edges: clonedEdges } = cloneVariants(
-      { ...node, data: { ...node.data, prompt } },
-      getEdges(),
-      count,
-    );
+    const { nodes: clones, edges: clonedEdges } = cloneVariants(node, getEdges(), count);
 
     const generated = await Promise.all(clones.map(() => generateVideoPlaceholder()));
     const clonesWithOutput = clones.map((clone, index) => ({
@@ -141,7 +146,7 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
     const selected = history.entries.find((entry) => entry.id === entryId);
     if (!selected) return;
     setHistory((current) => setActiveEntry(current, entryId));
-    setPrompt(selected.prompt);
+    updateNodeData(id, { prompt: selected.prompt });
   }
 
   return (
@@ -193,7 +198,7 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
         className="nodrag mb-3 w-full resize-none rounded-md border border-border bg-background p-2 text-sm outline-none"
         rows={3}
         value={prompt}
-        onChange={(event) => setPrompt(event.target.value)}
+        onChange={(event) => updateNodeData(id, { prompt: event.target.value })}
         placeholder="Enter a prompt…"
         data-node-id={id}
       />

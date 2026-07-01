@@ -40,8 +40,15 @@ const DECORATIVE_CHIPS = ["1K", "1:1", "Light", "Style", "Camera"];
 // preview; issue #10 adds the `image` handle and the derived edit-mode
 // label — the mode is never chosen by hand, only computed from whether any
 // image is connected.
+//
+// ADR-0002: the prompt field is controlled from `data.prompt` and writes
+// through with updateNodeData on every change rather than shadowing it in
+// local state — otherwise it never reaches autosave or the Resolved Prompt
+// a downstream node reads via useNodesData. History still starts from
+// `data.history` for the restore-from-data path but stays local afterward,
+// matching the existing Generate/Regenerate/variant-clone flow.
 export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeType>) {
-  const [prompt, setPrompt] = useState(data.prompt);
+  const prompt = data.prompt;
   const [history, setHistory] = useState<NodeHistory>(data.history);
   const [isGenerating, setIsGenerating] = useState(false);
   // Variant counter (CONTEXT.md / issue #12): above one, Generate clones this
@@ -75,7 +82,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   const mode = imageGenerationMode(imageConnections.length > 0);
   const modeLabel = imageGenerationModeLabel(mode);
 
-  const { getNode, getEdges, addNodes, addEdges } = useReactFlow();
+  const { getNode, getEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
 
   // Variant cloning (CONTEXT.md / issue #12): when the counter is above one,
   // Generate clones this node into that many independent nodes instead of
@@ -83,6 +90,10 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   // incoming edges (lib/variant-clone.ts), is laid out with an offset, and
   // generates its own single fresh output — never a copy of this node's
   // History. The counter resets to 1 afterward.
+  //
+  // ADR-0002: getNode(id) already returns the live `data.prompt` — the
+  // prompt field writes through on every keystroke — so no manual merge of
+  // the local prompt into the cloned node's data is needed here.
   async function handleGenerateVariants(count: number) {
     setIsGenerating(true);
     const node = getNode(id);
@@ -90,11 +101,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
       setIsGenerating(false);
       return;
     }
-    const { nodes: clones, edges: clonedEdges } = cloneVariants(
-      { ...node, data: { ...node.data, prompt } },
-      getEdges(),
-      count,
-    );
+    const { nodes: clones, edges: clonedEdges } = cloneVariants(node, getEdges(), count);
 
     const generated = await Promise.all(clones.map(() => generateImagePlaceholder()));
     const clonesWithOutput = clones.map((clone, index) => ({
@@ -136,7 +143,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
     const selected = history.entries.find((entry) => entry.id === entryId);
     if (!selected) return;
     setHistory((current) => setActiveEntry(current, entryId));
-    setPrompt(selected.prompt);
+    updateNodeData(id, { prompt: selected.prompt });
   }
 
   return (
@@ -225,7 +232,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         className="nodrag mb-3 w-full resize-none rounded-md border border-border bg-background p-2 text-sm outline-none"
         rows={3}
         value={prompt}
-        onChange={(event) => setPrompt(event.target.value)}
+        onChange={(event) => updateNodeData(id, { prompt: event.target.value })}
         placeholder="Enter a prompt…"
         data-node-id={id}
       />

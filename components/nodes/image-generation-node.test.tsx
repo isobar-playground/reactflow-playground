@@ -6,6 +6,7 @@ import {
   ReactFlowProvider,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Edge,
   type Node,
 } from "@xyflow/react";
@@ -20,10 +21,37 @@ const nodeTypes = {
   staticMediaReference: StaticMediaReferenceNode,
 };
 
+// Node data write-through (ADR-0002) only round-trips back into a controlled
+// input when React Flow's nodes/edges are owned by useNodesState/
+// useEdgesState with onNodesChange/onEdgesChange wired through — the same
+// way components/canvas-editor.tsx wires the real canvas. A static
+// `nodes={[...]}` literal has nowhere for an internal updateNodeData/addNodes
+// change to flow back to.
+function renderInCanvas(initialNodes: Node[], initialEdges: Edge[] = []) {
+  function TestCanvas() {
+    const [nodes, , onNodesChange] = useNodesState<Node>(initialNodes);
+    const [edges, , onEdgesChange] = useEdgesState<Edge>(initialEdges);
+    return (
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+      />
+    );
+  }
+  return render(
+    <ReactFlowProvider>
+      <TestCanvas />
+    </ReactFlowProvider>,
+  );
+}
+
 function renderNode(
   data: ImageGenerationNodeData = { prompt: "", history: { entries: [], activeId: null } },
 ) {
-  const nodes = [
+  return renderInCanvas([
     {
       id: "n1",
       type: "imageGeneration",
@@ -35,12 +63,7 @@ function renderNode(
       initialHeight: 500,
       data,
     },
-  ];
-  return render(
-    <ReactFlowProvider>
-      <ReactFlow nodes={nodes} edges={[]} nodeTypes={nodeTypes} />
-    </ReactFlowProvider>,
-  );
+  ]);
 }
 
 describe("ImageGenerationNode layout", () => {
@@ -239,6 +262,52 @@ describe("ImageGenerationNode persistence", () => {
     expect(image).toHaveAttribute("src", "https://picsum.photos/seed/xyz/768/768");
     expect(screen.getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
   });
+
+  // ADR-0002: node `data` is the single source of truth for persisted canvas
+  // content, so typing into the prompt field must write through to
+  // `data.prompt` — not just local component state — otherwise it never
+  // reaches autosave. Verified via getNode(id), not the DOM value alone.
+  it("writes a typed prompt through to node data", async () => {
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "", history: { entries: [], activeId: null } },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    const prompt = screen.getByPlaceholderText(/prompt/i);
+    await user.type(prompt, "a cat");
+
+    await waitFor(() => {
+      expect((getNodeRef?.("n1")?.data as ImageGenerationNodeData).prompt).toBe("a cat");
+    });
+  });
 });
 
 describe("ImageGenerationNode text handle and Resolved Prompt", () => {
@@ -329,34 +398,6 @@ describe("ImageGenerationNode text handle and Resolved Prompt", () => {
     expect(screen.getByText("a red car a happy dog combined")).toBeInTheDocument();
   });
 });
-
-// Variant cloning (issue #12) adds sibling nodes to the graph via
-// useReactFlow's addNodes/addEdges from inside the node component. That only
-// takes effect when the surrounding <ReactFlow> is wired the same way
-// components/canvas-editor.tsx wires it — nodes/edges owned by
-// useNodesState/useEdgesState with onNodesChange/onEdgesChange passed
-// through — unlike the static `nodes={[...]}` literal the other tests in
-// this file use, which has nowhere for an internal addNodes change to flow.
-function renderInCanvas(initialNodes: Node[]) {
-  function TestCanvas() {
-    const [nodes, , onNodesChange] = useNodesState<Node>(initialNodes);
-    const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
-    return (
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-      />
-    );
-  }
-  return render(
-    <ReactFlowProvider>
-      <TestCanvas />
-    </ReactFlowProvider>,
-  );
-}
 
 describe("ImageGenerationNode variant cloning (issue #12)", () => {
   afterEach(() => {
