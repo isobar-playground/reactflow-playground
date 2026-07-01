@@ -6,6 +6,7 @@ import {
   createCanvas,
   renameCanvas,
   deleteCanvas,
+  updateGraph,
 } from "@/lib/canvas-repo";
 
 export async function createCanvasAction() {
@@ -21,4 +22,8 @@ export async function renameCanvasAction(id: string, name: string) {
 export async function deleteCanvasAction(id: string) {
   await deleteCanvas(id);
   revalidatePath("/");
+}
+
+export async function saveCanvasGraphAction(id: string, graph: Record<string, unknown>) {
+  await updateGraph(id, graph);
 }

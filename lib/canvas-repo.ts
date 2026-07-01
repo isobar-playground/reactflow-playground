@@ -62,3 +62,15 @@ export async function deleteCanvas(id: string): Promise<void> {
   const db = await getDb();
   await db.query("delete from canvases where id = $1", [id]);
 }
+
+export async function updateGraph(
+  id: string,
+  graph: Record<string, unknown>,
+): Promise<Canvas | undefined> {
+  const db = await getDb();
+  const rows = await db.query<CanvasRow>(
+    "update canvases set graph = $2, updated_at = now() where id = $1 returning id, name, graph, updated_at",
+    [id, JSON.stringify(graph)],
+  );
+  return rows[0] ? fromRow(rows[0]) : undefined;
+}
