@@ -50,6 +50,18 @@ _Avoid_: Copy, duplicate
 A node created by dragging from an existing node's handle and dropping on empty canvas, rather than from the right-click menu. The picker offered is filtered to only the node types that would form a valid connection at that handle (per Connection rules), and the new node is auto-connected to the handle it was dragged from. When a Generation Node has more than one input handle accepting the dragged data type (e.g. Video Generation Node's `start frame`/`end frame`/`image reference` all accept image), the first such handle in the node's declared order is used. The exception is a Static Media Reference: it has no output until an asset is chosen (ADR-0003), so picking it opens its Asset Picker immediately with a type hint restricting the choice to the dragged handle's data type, and the edge is created only once an asset is picked — not at spawn time. Cancelling that picker leaves the node on the canvas, unconnected.
 _Avoid_: Quick-add node, drag-to-create
 
+**Model**:
+A FAL inference endpoint a Generation Node can call, identified by its `endpoint_id` (e.g. `fal-ai/flux/dev`). Its `category` — one of text-to-image, image-to-image, text-to-video, image-to-video, video-to-video — maps 1:1 onto a generation Mode. Only these five categories are surfaced; FAL's other categories (llm, speech-to-text, training, …) have no node to use them and are not shown.
+_Avoid_: Endpoint (in UI), algorithm
+
+**Model Catalog**:
+The set of Models the app can show. Sourced live from FAL rather than stored by the app, and joined against the app's approvals for display.
+_Avoid_: Model list, registry
+
+**Approved Model**:
+A Model the app has marked as available for selection on the canvas — the only Model state the app owns (a set of `endpoint_id`s; shared, with no per-user scoping, like the Asset Library). Deliberately distinct from FAL's own `status: active` (FAL's lifecycle) and `is_favorited` (a per-FAL-account favourite).
+_Avoid_: Active model, Enabled model, Favorite
+
 ## Connection rules
 
 A directed edge means "the source's output feeds a specific input handle of the target".
