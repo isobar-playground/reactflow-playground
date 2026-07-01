@@ -31,7 +31,7 @@ export function HandleBadge({
     <Handle type={type} position={position} id={id} style={style} title={title}>
       <div
         className={cn(
-          "pointer-events-none flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background text-[10px] font-semibold text-foreground",
+          "pointer-events-none absolute left-1/2 top-1/2 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-background text-[10px] font-semibold text-foreground",
         )}
       >
         <DataTypeGlyph dataType={dataType} />
