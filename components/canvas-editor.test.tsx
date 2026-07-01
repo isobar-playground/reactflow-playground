@@ -134,4 +134,42 @@ describe("CanvasEditor persistence", () => {
 
     expect(screen.getByPlaceholderText("Enter text…")).toHaveValue("saved text");
   });
+
+  it("restores an Image Generation Node's saved prompt and output", () => {
+    render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "n1",
+              type: "imageGeneration",
+              position: { x: 0, y: 0 },
+              data: {
+                prompt: "saved prompt",
+                output: { kind: "image", url: "https://picsum.photos/seed/xyz/768/768" },
+              },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    expect(screen.getByPlaceholderText(/prompt/i)).toHaveValue("saved prompt");
+    expect(screen.getByAltText(/output/i)).toHaveAttribute(
+      "src",
+      "https://picsum.photos/seed/xyz/768/768",
+    );
+  });
+});
+
+describe("CanvasEditor Image Generation Node from the menu", () => {
+  it("adds an Image Generation Node when picked from the empty-canvas menu", async () => {
+    const user = userEvent.setup();
+    render(<CanvasEditor canvas={makeCanvas({ nodes: [], edges: [] })} />);
+
+    await user.click(screen.getByText("Image Generation Node"));
+
+    expect(await screen.findByPlaceholderText(/prompt/i)).toBeInTheDocument();
+  });
 });

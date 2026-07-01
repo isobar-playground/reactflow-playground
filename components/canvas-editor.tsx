@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { AddNodeContextMenuContent, EmptyCanvasMenu } from "@/components/add-node-menu";
 import { StaticTextReferenceNode } from "@/components/nodes/static-text-reference-node";
+import { ImageGenerationNode } from "@/components/nodes/image-generation-node";
 import { saveCanvasGraphAction } from "@/app/canvas-actions";
 import { debounce } from "@/lib/debounce";
 import { createNodeAt, shouldShowEmptyCanvasMenu, type NodeTypeKey } from "@/lib/add-node-menu";
@@ -31,6 +32,7 @@ const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 
 const nodeTypes = {
   staticTextReference: StaticTextReferenceNode,
+  imageGeneration: ImageGenerationNode,
 };
 
 function graphNodes(canvas: Canvas): Node[] {
