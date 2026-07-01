@@ -25,7 +25,9 @@ let cached: Db | undefined;
 export async function getDb(): Promise<Db> {
   if (cached) return cached;
   const url = process.env.DATABASE_URL;
-  cached = url ? await neonDb(url) : await localDb();
+  const db = url ? await neonDb(url) : await localDb();
+  await migrate(db);
+  cached = db;
   return cached;
 }
 

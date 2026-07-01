@@ -1,10 +1,20 @@
-export default function Home() {
+import { listCanvases } from "@/lib/canvas-repo";
+import { CanvasList } from "@/components/canvas-list";
+import { NewCanvasButton } from "@/components/new-canvas-button";
+
+// Canvas list is live, shared data — never prerender/cache it statically.
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  const canvases = await listCanvases();
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-2 p-6">
-      <h1 className="text-xl font-semibold">React Flow Playground</h1>
-      <p className="text-sm text-black/60 dark:text-white/60">
-        You&apos;re in. Canvas list lands here (issue #3).
-      </p>
+    <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-6 p-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">React Flow Playground</h1>
+        <NewCanvasButton />
+      </div>
+      <CanvasList canvases={canvases} />
     </main>
   );
 }
