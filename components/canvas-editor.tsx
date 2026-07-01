@@ -29,6 +29,7 @@ import {
 } from "@/components/nodes/static-media-reference-node";
 import { ImageGenerationNode } from "@/components/nodes/image-generation-node";
 import { VideoGenerationNode } from "@/components/nodes/video-generation-node";
+import { DeletableEdge } from "@/components/edges/deletable-edge";
 import { saveCanvasGraphAction } from "@/app/canvas-actions";
 import { debounce } from "@/lib/debounce";
 import { createNodeAt, shouldShowEmptyCanvasMenu, NODE_TYPE_OPTIONS, type NodeTypeKey } from "@/lib/add-node-menu";
@@ -49,6 +50,14 @@ const nodeTypes = {
   staticMediaReference: StaticMediaReferenceNode,
   imageGeneration: ImageGenerationNode,
   videoGeneration: VideoGenerationNode,
+};
+
+// ADR-0004 / issue #19: no persisted edge sets an explicit `type`, so every
+// edge is already treated as "default" — overriding that one entry applies
+// the hover-X delete button to every existing and future edge, with no data
+// migration, regardless of what node types it connects.
+const edgeTypes = {
+  default: DeletableEdge,
 };
 
 // A Static Media Reference's output type isn't fixed per node type (it's
@@ -390,6 +399,7 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
               nodes={nodes}
               edges={edges}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               defaultViewport={initialViewport}
               onInit={setReactFlowInstance}
               onNodesChange={onNodesChange}

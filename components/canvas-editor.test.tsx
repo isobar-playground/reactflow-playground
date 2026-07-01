@@ -544,4 +544,40 @@ describe("CanvasEditor edge deletion between any node types", () => {
       expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(0);
     });
   });
+
+  it("removes an edge between differently-typed nodes via the hover-revealed '×' button (ADR-0004 / issue #19)", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            { id: "ref1", type: "staticTextReference", position: { x: 0, y: 0 }, data: { text: "a red car" } },
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 400, y: 0 },
+              data: { prompt: "in a driveway", history: { entries: [], activeId: null } },
+            },
+          ],
+          edges: [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }],
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("a red car in a driveway")).toBeInTheDocument();
+
+    expect(screen.queryByRole("button", { name: "Delete edge" })).not.toBeInTheDocument();
+
+    const interactionPath = container.querySelector(
+      '[data-testid="deletable-edge-interaction"]',
+    ) as HTMLElement;
+    fireEvent.mouseEnter(interactionPath);
+
+    const deleteButton = await screen.findByRole("button", { name: "Delete edge" });
+    await user.click(deleteButton);
+
+    await waitFor(() => {
+      expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(0);
+    });
+  });
 });
