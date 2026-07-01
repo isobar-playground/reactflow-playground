@@ -23,7 +23,7 @@ _Avoid_: Static Image Reference, Static Video Reference
 A Reference that holds user-entered text, which other nodes can consume (e.g. as part of a prompt).
 
 **Generation Node**:
-A node that takes one or more inputs (References or other Generation Nodes), holds a prompt, and produces an output asset when "Generate" is triggered. Comes in two kinds: an Image Generation Node and a Video Generation Node.
+A node that selects a Model, takes one or more inputs (References or other Generation Nodes), holds a prompt, and produces an output asset when "Generate" is triggered. Comes in two kinds: an Image Generation Node and a Video Generation Node. Until a Model is selected it has no input handles; the selected Model's input schema defines them (see Model and Connection rules). If the selected Model's schema has a `negative_prompt`, the node also shows an optional negative-prompt field beneath the prompt — an editable **config field**, not an Input Handle, and not part of the Resolved Prompt. Other scalar parameters (guidance, steps, seed, …) are not surfaced.
 _Avoid_: Generator, asset node
 
 **Image Generation Node**:
@@ -47,12 +47,20 @@ When a Generation Node's variant count is set above one and generation is trigge
 _Avoid_: Copy, duplicate
 
 **Handle-Spawned Node**:
-A node created by dragging from an existing node's handle and dropping on empty canvas, rather than from the right-click menu. The picker offered is filtered to only the node types that would form a valid connection at that handle (per Connection rules), and the new node is auto-connected to the handle it was dragged from. When a Generation Node has more than one input handle accepting the dragged data type (e.g. Video Generation Node's `start frame`/`end frame`/`image reference` all accept image), the first such handle in the node's declared order is used. The exception is a Static Media Reference: it has no output until an asset is chosen (ADR-0003), so picking it opens its Asset Picker immediately with a type hint restricting the choice to the dragged handle's data type, and the edge is created only once an asset is picked — not at spawn time. Cancelling that picker leaves the node on the canvas, unconnected.
+A node created by dragging from an existing node's handle and dropping on empty canvas, rather than from the right-click menu. The picker offered is filtered to only the node types that could form a valid connection at that handle (per Connection rules), and the new node is auto-connected to the handle it was dragged from. Two node types can't auto-connect at spawn and defer the edge to a later choice:
+- A **Static Media Reference** has no output until an asset is chosen (ADR-0003), so picking it opens its Asset Picker immediately with a type hint restricting the choice to the dragged handle's data type; the edge is created only once an asset is picked.
+- A **Generation Node** has no input handles until a Model is selected, so picking it creates the node and offers its Model picker — all Models of that node's output category, *not* pre-filtered by the dragged data type. The edge is created only once a Model is selected, and only if the resolved handles include one compatible with the dragged type, attached to the first such handle in schema order. Picking a Model with no compatible handle drops the pending edge. Re-selecting a Model later drops any existing input edges whose handle the new Model doesn't expose (silently, per ADR-0004's no-confirmation ethos).
+
+Cancelling either picker leaves the node on the canvas, unconnected.
 _Avoid_: Quick-add node, drag-to-create
 
 **Model**:
-A FAL inference endpoint a Generation Node can call, identified by its `endpoint_id` (e.g. `fal-ai/flux/dev`). Its `category` — one of text-to-image, image-to-image, text-to-video, image-to-video, video-to-video — maps 1:1 onto a generation Mode. Only these five categories are surfaced; FAL's other categories (llm, speech-to-text, training, …) have no node to use them and are not shown.
+A FAL inference endpoint a Generation Node calls, identified by its `endpoint_id` (e.g. `fal-ai/flux/dev`). Selecting a Model is what gives a Generation Node its shape: the Model's FAL input schema defines the node's connectable **input handles** (see Connection rules), and the Model's output determines the node's output type. Its `category` — one of text-to-image, image-to-image, text-to-video, image-to-video, video-to-video — groups Models by output modality for selection: an Image Generation Node offers only the image-output categories (text-to-image, image-to-image), a Video Generation Node only the video-output ones (text-to-video, image-to-video, video-to-video). The category is shown as the node's label; it is a property of the chosen Model, **not** derived from which inputs are connected. Only these five categories are surfaced; FAL's other categories (llm, speech-to-text, training, …) have no node to use them and are not shown.
 _Avoid_: Endpoint (in UI), algorithm
+
+**Input Handle**:
+A typed connection point where a reference feeds into a Generation Node. A node's input handles are not fixed per node type — they are derived from the selected Model's FAL input schema: each media or text input in the schema becomes one input handle, labelled with the schema field name (e.g. `image_urls`, `start_image_url`, `prompt`), typed image / video / text, accepting *many* if the field is an array else *one*. Scalar generation parameters (guidance, steps, duration, seed, …) are not input handles. Inputs of media types the app doesn't model (audio, pdf) get no handle.
+_Avoid_: input reference, input port, slot
 
 **Model Catalog**:
 The set of Models the app can show. Sourced live from FAL rather than stored by the app, and joined against the app's approvals for display.
@@ -67,22 +75,8 @@ _Avoid_: Active model, Enabled model, Favorite
 A directed edge means "the source's output feeds a specific input handle of the target".
 
 - References have an output handle only — nothing can connect *into* a Reference.
-- Generation Nodes have an output handle and several **named, typed input handles** (below). Outputs may chain into further Generation Nodes.
+- Generation Nodes have an output handle and, once a Model is selected, the **Input Handles** derived from that Model's FAL input schema. Outputs may chain into further Generation Nodes.
 - Connections are validated by the data type accepted at each handle; disallowed edges are rejected at connect time. A node feeding a downstream consumer provides its Active Output.
 - A Static Media Reference has no connectable output until an asset is chosen — its data type isn't known before then (ADR-0003).
 
-**Image Generation Node — input handles:**
-- `text` — accepts Static Text References (many; concatenated into the Resolved Prompt).
-- `image` — accepts images (media ref or image-gen output); many allowed. When any image is connected the node is in **edit** mode rather than pure generation.
-
-**Video Generation Node — input handles:**
-- `text` — accepts Static Text References (many).
-- `start frame` — one image.
-- `end frame` — one image.
-- `image reference` — many images.
-- `video` — one video. **Mutually exclusive** with `start frame`, `end frame` and `image reference`: when a video is connected those handles are blocked, leaving only `text`.
-
-**Modes** are derived from which inputs are connected, never chosen by hand; the node displays the resulting mode label:
-- Image Gen: text only → text→image; any image present → image→image (edit).
-- Video Gen: text only → text→video; frames/image references present → image→video; video present → video→video.
-- Video → an Image Generation Node is never allowed (no video→image).
+**A Generation Node's Input Handles come from its selected Model, not from a fixed per-node-type list.** Which handles exist, their labels, their data types, and whether each takes one or many are all read from the Model's FAL input schema (see Input Handle). Before a Model is selected the node has no input handles at all. Because handles follow the actual Model, the node type only constrains **output** modality, not inputs — so an image-output Model that happens to accept a video input (they exist on FAL) gives an Image Generation Node a video Input Handle, and a Video → Image edge into that handle is allowed. There is no built-in mode-derived or video-exclusivity rule; validity is purely the data type each Model-declared handle accepts.
