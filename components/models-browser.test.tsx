@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ModelsBrowser } from "./models-browser";
 import type { Model } from "@/lib/fal-models";
@@ -34,7 +34,10 @@ describe("ModelsBrowser (read-only catalog)", () => {
     render(<ModelsBrowser models={[model()]} />);
 
     expect(screen.getByText("FLUX.1 [dev]")).toBeInTheDocument();
-    expect(screen.getByText("text-to-image")).toBeInTheDocument();
+    // "text-to-image" also appears as a category filter <option>, so scope the
+    // badge assertion to the rendered Model card (the list item).
+    const card = screen.getByRole("listitem");
+    expect(within(card).getByText("text-to-image")).toBeInTheDocument();
     expect(screen.getByText("A fast text-to-image model.")).toBeInTheDocument();
   });
 
@@ -92,5 +95,81 @@ describe("ModelsBrowser (approvals)", () => {
 
     expect(unapproveModelAction).toHaveBeenCalledWith("fal-ai/flux/dev");
     expect(approveModelAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("ModelsBrowser (search and filters)", () => {
+  const flux = model({
+    endpointId: "fal-ai/flux/dev",
+    name: "FLUX.1 [dev]",
+    category: "text-to-image",
+    description: "",
+    tags: [],
+  });
+  const kling = model({
+    endpointId: "fal-ai/kling/video",
+    name: "Kling Video",
+    category: "text-to-video",
+    description: "",
+    tags: [],
+  });
+
+  it("narrows the list as text is typed into the search box", async () => {
+    render(<ModelsBrowser models={[flux, kling]} />);
+
+    expect(screen.getByText("FLUX.1 [dev]")).toBeInTheDocument();
+    expect(screen.getByText("Kling Video")).toBeInTheDocument();
+
+    await userEvent.type(screen.getByRole("searchbox"), "kling");
+
+    expect(screen.queryByText("FLUX.1 [dev]")).not.toBeInTheDocument();
+    expect(screen.getByText("Kling Video")).toBeInTheDocument();
+  });
+
+  it("narrows the list when a category filter is chosen", async () => {
+    render(<ModelsBrowser models={[flux, kling]} />);
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: /category/i }),
+      "text-to-video",
+    );
+
+    expect(screen.queryByText("FLUX.1 [dev]")).not.toBeInTheDocument();
+    expect(screen.getByText("Kling Video")).toBeInTheDocument();
+  });
+
+  it("narrows the list when the approval filter is toggled", async () => {
+    render(
+      <ModelsBrowser
+        models={[flux, kling]}
+        approvedIds={["fal-ai/flux/dev"]}
+      />,
+    );
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: /approval/i }),
+      "approved",
+    );
+
+    expect(screen.getByText("FLUX.1 [dev]")).toBeInTheDocument();
+    expect(screen.queryByText("Kling Video")).not.toBeInTheDocument();
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: /approval/i }),
+      "not-approved",
+    );
+
+    expect(screen.queryByText("FLUX.1 [dev]")).not.toBeInTheDocument();
+    expect(screen.getByText("Kling Video")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when a search matches no models", async () => {
+    render(<ModelsBrowser models={[flux, kling]} />);
+
+    await userEvent.type(screen.getByRole("searchbox"), "nonexistent");
+
+    expect(screen.queryByText("FLUX.1 [dev]")).not.toBeInTheDocument();
+    expect(screen.queryByText("Kling Video")).not.toBeInTheDocument();
+    expect(screen.getByText(/no models match/i)).toBeInTheDocument();
   });
 });
