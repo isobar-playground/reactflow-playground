@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -13,16 +13,25 @@ import {
   type Node,
   type Viewport,
   type ReactFlowJsonObject,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { AddNodeContextMenuContent, EmptyCanvasMenu } from "@/components/add-node-menu";
+import { StaticTextReferenceNode } from "@/components/nodes/static-text-reference-node";
 import { saveCanvasGraphAction } from "@/app/canvas-actions";
 import { debounce } from "@/lib/debounce";
+import { createNodeAt, shouldShowEmptyCanvasMenu, type NodeTypeKey } from "@/lib/add-node-menu";
 import type { Canvas } from "@/lib/canvas-repo";
 
 const AUTOSAVE_DELAY_MS = 1500;
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
+
+const nodeTypes = {
+  staticTextReference: StaticTextReferenceNode,
+};
 
 function graphNodes(canvas: Canvas): Node[] {
   const nodes = canvas.graph.nodes;
@@ -42,12 +51,31 @@ function graphViewport(canvas: Canvas): Viewport {
 }
 
 export function CanvasEditor({ canvas }: { canvas: Canvas }) {
-  const [nodes, , onNodesChange] = useNodesState<Node>(graphNodes(canvas));
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(graphNodes(canvas));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(graphEdges(canvas));
   // Initial viewport is only read once, by ReactFlow's `defaultViewport` on mount.
   const [initialViewport] = useState<Viewport>(() => graphViewport(canvas));
   const viewportRef = useRef<Viewport>(initialViewport);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  // The right-click point (in flow coordinates) the context menu should
+  // spawn the chosen node at; unset while the menu is closed.
+  const pendingSpawnPosition = useRef<{ x: number; y: number } | null>(null);
+
+  const addNode = useCallback(
+    (type: NodeTypeKey, position: { x: number; y: number }) => {
+      setNodes((current) => [...current, createNodeAt(type, position) as Node]);
+    },
+    [setNodes],
+  );
+
+  function centreOfCanvas(): { x: number; y: number } {
+    if (!reactFlowInstance) return { x: 0, y: 0 };
+    return reactFlowInstance.screenToFlowPosition({
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 2,
+    });
+  }
 
   const persist = useMemo(
     () =>
@@ -97,24 +125,53 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
           </Button>
         </div>
       </header>
-      <div className="flex-1">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          defaultViewport={initialViewport}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={(connection: Connection) => {
-            setEdges((eds) => addEdge(connection, eds));
-          }}
-          onMoveEnd={(_, viewport) => {
-            viewportRef.current = viewport;
-            persist(currentGraph());
+      <div className="relative flex-1">
+        <ContextMenu
+          onOpenChange={(open) => {
+            if (!open) pendingSpawnPosition.current = null;
           }}
         >
-          <Background />
-          <Controls />
-        </ReactFlow>
+          <ContextMenuTrigger
+            className="block h-full w-full"
+            onContextMenu={(event) => {
+              if (!reactFlowInstance) return;
+              pendingSpawnPosition.current = reactFlowInstance.screenToFlowPosition({
+                x: event.clientX,
+                y: event.clientY,
+              });
+            }}
+          >
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              defaultViewport={initialViewport}
+              onInit={setReactFlowInstance}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={(connection: Connection) => {
+                setEdges((eds) => addEdge(connection, eds));
+              }}
+              onMoveEnd={(_, viewport) => {
+                viewportRef.current = viewport;
+                persist(currentGraph());
+              }}
+            >
+              <Background />
+              <Controls />
+            </ReactFlow>
+          </ContextMenuTrigger>
+          <AddNodeContextMenuContent
+            onSelect={(type) => {
+              addNode(type, pendingSpawnPosition.current ?? centreOfCanvas());
+              pendingSpawnPosition.current = null;
+            }}
+          />
+        </ContextMenu>
+
+        {shouldShowEmptyCanvasMenu(nodes.length) && (
+          <EmptyCanvasMenu onSelect={(type) => addNode(type, centreOfCanvas())} />
+        )}
       </div>
     </div>
   );
