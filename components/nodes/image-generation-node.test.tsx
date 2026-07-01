@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ReactFlow, ReactFlowProvider } from "@xyflow/react";
 import * as generationMock from "@/lib/generation-mock";
@@ -7,7 +7,9 @@ import { ImageGenerationNode, type ImageGenerationNodeData } from "./image-gener
 
 const nodeTypes = { imageGeneration: ImageGenerationNode };
 
-function renderNode(data: ImageGenerationNodeData = { prompt: "", output: null }) {
+function renderNode(
+  data: ImageGenerationNodeData = { prompt: "", history: { entries: [], activeId: null } },
+) {
   const nodes = [
     {
       id: "n1",
@@ -117,9 +119,109 @@ describe("ImageGenerationNode generation", () => {
   });
 });
 
+describe("ImageGenerationNode history carousel", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows no carousel after the first generation", async () => {
+    vi.spyOn(generationMock, "generateImagePlaceholder").mockResolvedValue({
+      kind: "image",
+      url: "https://picsum.photos/seed/a/768/768",
+    });
+    const user = userEvent.setup();
+    renderNode();
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await screen.findByRole("img", { name: /output/i });
+
+    expect(screen.queryAllByRole("button", { name: /history/i })).toHaveLength(0);
+  });
+
+  it("reveals a carousel with two thumbnails after the second generation", async () => {
+    vi.spyOn(generationMock, "generateImagePlaceholder")
+      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/a/768/768" })
+      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/b/768/768" });
+    const user = userEvent.setup();
+    renderNode();
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await screen.findByRole("img", { name: /output/i });
+    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await waitFor(() => {
+      expect(screen.getByRole("img", { name: /output/i })).toHaveAttribute(
+        "src",
+        "https://picsum.photos/seed/b/768/768",
+      );
+    });
+
+    const thumbnails = screen.getAllByRole("img", { name: /history entry/i });
+    expect(thumbnails).toHaveLength(2);
+  });
+
+  it("clicking an older thumbnail sets it as the active output and restores its prompt, without regenerating", async () => {
+    const generate = vi
+      .spyOn(generationMock, "generateImagePlaceholder")
+      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/a/768/768" })
+      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/b/768/768" });
+    const user = userEvent.setup();
+    renderNode();
+
+    const promptField = screen.getByPlaceholderText(/prompt/i);
+    await user.type(promptField, "first prompt");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await screen.findByRole("img", { name: /output/i });
+
+    await user.clear(promptField);
+    await user.type(promptField, "second prompt");
+    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await waitFor(() => {
+      expect(screen.getByRole("img", { name: /output/i })).toHaveAttribute(
+        "src",
+        "https://picsum.photos/seed/b/768/768",
+      );
+    });
+
+    expect(generate).toHaveBeenCalledTimes(2);
+
+    const thumbnails = screen.getAllByRole("img", { name: /history entry/i });
+    await user.click(thumbnails[0]);
+
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(promptField).toHaveValue("first prompt");
+    const mainOutput = screen.getByRole("img", { name: /output/i });
+    expect(mainOutput).toHaveAttribute("src", "https://picsum.photos/seed/a/768/768");
+  });
+
+  it("has no length limit on history entries", async () => {
+    const generate = vi.spyOn(generationMock, "generateImagePlaceholder");
+    for (let i = 0; i < 5; i++) {
+      generate.mockResolvedValueOnce({ kind: "image", url: `https://picsum.photos/seed/${i}/768/768` });
+    }
+    const user = userEvent.setup();
+    renderNode();
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await screen.findByRole("img", { name: /output/i });
+    for (let i = 0; i < 4; i++) {
+      await user.click(screen.getByRole("button", { name: "Regenerate" }));
+      await screen.findByRole("button", { name: "Regenerate" });
+    }
+
+    const thumbnails = screen.getAllByRole("img", { name: /history entry/i });
+    expect(thumbnails).toHaveLength(5);
+  });
+});
+
 describe("ImageGenerationNode persistence", () => {
-  it("restores a saved prompt and output without regenerating", () => {
-    renderNode({ prompt: "saved prompt", output: { kind: "image", url: "https://picsum.photos/seed/xyz/768/768" } });
+  it("restores a saved prompt and active output without regenerating", () => {
+    renderNode({
+      prompt: "saved prompt",
+      history: {
+        entries: [{ id: "a", prompt: "saved prompt", output: { kind: "image", url: "https://picsum.photos/seed/xyz/768/768" } }],
+        activeId: "a",
+      },
+    });
 
     expect(screen.getByPlaceholderText(/prompt/i)).toHaveValue("saved prompt");
     const image = screen.getByRole("img", { name: /output/i });

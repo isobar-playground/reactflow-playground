@@ -43,7 +43,7 @@ function initialDataFor(type: NodeTypeKey): Record<string, unknown> {
     case "staticTextReference":
       return { text: "" };
     case "imageGeneration":
-      return { prompt: "", output: null };
+      return { prompt: "", history: { entries: [], activeId: null } };
     default:
       return {};
   }

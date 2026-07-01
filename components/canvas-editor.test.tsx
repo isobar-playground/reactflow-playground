@@ -146,7 +146,16 @@ describe("CanvasEditor persistence", () => {
               position: { x: 0, y: 0 },
               data: {
                 prompt: "saved prompt",
-                output: { kind: "image", url: "https://picsum.photos/seed/xyz/768/768" },
+                history: {
+                  entries: [
+                    {
+                      id: "a",
+                      prompt: "saved prompt",
+                      output: { kind: "image", url: "https://picsum.photos/seed/xyz/768/768" },
+                    },
+                  ],
+                  activeId: "a",
+                },
               },
             },
           ],

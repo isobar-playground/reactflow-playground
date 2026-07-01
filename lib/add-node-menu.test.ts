@@ -35,10 +35,10 @@ describe("add-node-menu", () => {
     expect(first.id).not.toBe(second.id);
   });
 
-  it("creates an Image Generation Node with an empty prompt and no output", () => {
+  it("creates an Image Generation Node with an empty prompt and empty history", () => {
     const node = createNodeAt("imageGeneration", { x: 0, y: 0 });
 
     expect(node.type).toBe("imageGeneration");
-    expect(node.data).toEqual({ prompt: "", output: null });
+    expect(node.data).toEqual({ prompt: "", history: { entries: [], activeId: null } });
   });
 });

@@ -2,11 +2,17 @@
 
 import { useState } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { generateImagePlaceholder, type ImagePlaceholderResult } from "@/lib/generation-mock";
+import { generateImagePlaceholder } from "@/lib/generation-mock";
+import {
+  appendEntry,
+  setActiveEntry,
+  getActiveEntry,
+  type NodeHistory,
+} from "@/lib/node-history";
 
 export type ImageGenerationNodeData = {
   prompt: string;
-  output: ImagePlaceholderResult | null;
+  history: NodeHistory;
 };
 
 export type ImageGenerationNodeType = Node<ImageGenerationNodeData, "imageGeneration">;
@@ -23,14 +29,29 @@ const DECORATIVE_CHIPS = ["1K", "1:1", "Light", "Style", "Camera"];
 // produces (rather than just holds) data.
 export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeType>) {
   const [prompt, setPrompt] = useState(data.prompt);
-  const [output, setOutput] = useState<ImagePlaceholderResult | null>(data.output);
+  const [history, setHistory] = useState<NodeHistory>(data.history);
   const [isGenerating, setIsGenerating] = useState(false);
 
+  const activeEntry = getActiveEntry(history);
+
+  // Every Generate/Regenerate appends a new History entry — even with an
+  // unchanged prompt — and that entry becomes the Active Output (CONTEXT.md).
   async function handleGenerate() {
     setIsGenerating(true);
     const result = await generateImagePlaceholder();
-    setOutput(result);
+    setHistory((current) =>
+      appendEntry(current, { id: crypto.randomUUID(), prompt, output: result }),
+    );
     setIsGenerating(false);
+  }
+
+  // Selecting a History thumbnail sets the Active Output and restores that
+  // entry's prompt into the field. It never triggers regeneration.
+  function handleSelectHistoryEntry(entryId: string) {
+    const selected = history.entries.find((entry) => entry.id === entryId);
+    if (!selected) return;
+    setHistory((current) => setActiveEntry(current, entryId));
+    setPrompt(selected.prompt);
   }
 
   return (
@@ -40,10 +61,10 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
       <div className="mb-3 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg bg-muted">
         {isGenerating ? (
           <span className="text-sm text-muted-foreground">Generating…</span>
-        ) : output ? (
+        ) : activeEntry ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={output.url}
+            src={activeEntry.output.url}
             alt="Generation output"
             className="h-full w-full object-cover"
           />
@@ -51,6 +72,30 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
           <span className="text-sm text-muted-foreground">No output yet</span>
         )}
       </div>
+
+      {/* History carousel (CONTEXT.md): only appears from the second entry
+          onward, so the node stays simple until there's history. */}
+      {history.entries.length >= 2 && (
+        <div className="nodrag mb-3 flex gap-1.5 overflow-x-auto">
+          {history.entries.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              onClick={() => handleSelectHistoryEntry(entry.id)}
+              className={`h-12 w-12 shrink-0 overflow-hidden rounded-md border ${
+                entry.id === history.activeId ? "border-primary" : "border-border"
+              }`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={entry.output.url}
+                alt="History entry"
+                className="h-full w-full object-cover"
+              />
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="mb-3 flex flex-wrap gap-1.5">
         {DECORATIVE_CHIPS.map((label) => (
@@ -101,7 +146,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         disabled={isGenerating}
         className="nodrag w-full rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
       >
-        {isGenerating ? "Generating…" : output ? "Regenerate" : "Generate"}
+        {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
       </button>
 
       <Handle type="source" position={Position.Right} />
