@@ -118,6 +118,29 @@ describe("filterModels — approval narrowing", () => {
   });
 });
 
+describe("filterModels — sorting", () => {
+  const older = model({ endpointId: "old", name: "Beta", addedAt: "2025-01-01T00:00:00Z" });
+  const newer = model({ endpointId: "new", name: "Alpha", addedAt: "2026-06-01T00:00:00Z" });
+
+  it("defaults to newest-added first", () => {
+    expect(filterModels([older, newer])).toEqual([newer, older]);
+  });
+
+  it("sorts oldest-added first when asked", () => {
+    expect(filterModels([newer, older], { sort: "oldest" })).toEqual([older, newer]);
+  });
+
+  it("sorts by name A–Z when asked", () => {
+    expect(filterModels([older, newer], { sort: "name" })).toEqual([newer, older]);
+  });
+
+  it("puts models without a date last under 'newest'", () => {
+    const dated = model({ endpointId: "dated", addedAt: "2026-01-01T00:00:00Z" });
+    const undated = model({ endpointId: "undated" });
+    expect(filterModels([undated, dated])).toEqual([dated, undated]);
+  });
+});
+
 describe("filterModels — combinations and empty result", () => {
   it("applies query, category, and approval together", () => {
     const target = model({

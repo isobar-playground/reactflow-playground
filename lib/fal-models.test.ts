@@ -22,6 +22,7 @@ function falEntry(
       description: "A fast text-to-image model.",
       tags: ["flux", "fast"],
       thumbnail_url: "https://fal.media/flux-dev.png",
+      date: "2026-01-01T00:00:00.000Z",
       ...metadata,
     },
   };
@@ -85,6 +86,7 @@ describe("fal-models catalog client", () => {
       description: "A fast text-to-image model.",
       tags: ["flux", "fast"],
       thumbnailUrl: "https://fal.media/flux-dev.png",
+      addedAt: "2026-01-01T00:00:00.000Z",
     });
   });
 

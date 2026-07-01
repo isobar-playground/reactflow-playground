@@ -10,6 +10,7 @@
 import type { Model, ModelCategory } from "./fal-models";
 
 export type ApprovalFilter = "all" | "approved" | "not-approved";
+export type SortOrder = "newest" | "oldest" | "name";
 
 export interface FilterCriteria {
   /** Free-text substring, matched case-insensitively across four fields. */
@@ -20,6 +21,8 @@ export interface FilterCriteria {
   approval?: ApprovalFilter;
   /** The approved endpoint ids, needed to evaluate the approval filter. */
   approvedIds?: string[];
+  /** Result ordering; defaults to newest-added first. */
+  sort?: SortOrder;
 }
 
 export function filterModels(
@@ -31,11 +34,27 @@ export function filterModels(
   const approval = criteria.approval ?? "all";
   const approvedIds = new Set(criteria.approvedIds ?? []);
 
-  return models.filter(
+  const matched = models.filter(
     (m) =>
       matchesQuery(m, query) &&
       (category === "all" || m.category === category) &&
       matchesApproval(approval, approvedIds.has(m.endpointId)),
+  );
+
+  return sortModels(matched, criteria.sort ?? "newest");
+}
+
+// `matched` is already a fresh array, so sort it in place. ISO-8601 date
+// strings compare chronologically as plain strings; models missing `addedAt`
+// (rare, old entries) fall to the end under "newest". Sort is stable, so when
+// dates tie (or all are absent) the original order is preserved.
+function sortModels(models: Model[], sort: SortOrder): Model[] {
+  if (sort === "name") {
+    return models.sort((a, b) => a.name.localeCompare(b.name));
+  }
+  const dir = sort === "oldest" ? 1 : -1;
+  return models.sort(
+    (a, b) => dir * (a.addedAt ?? "").localeCompare(b.addedAt ?? ""),
   );
 }
 

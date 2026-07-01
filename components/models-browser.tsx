@@ -10,6 +10,7 @@ import {
 import {
   filterModels,
   type ApprovalFilter,
+  type SortOrder,
 } from "@/lib/model-filter";
 
 // The `/models` page: browses the Model Catalog fetched live from FAL
@@ -29,12 +30,13 @@ export function ModelsBrowser({
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<ModelCategory | "all">("all");
   const [approval, setApproval] = useState<ApprovalFilter>("all");
+  const [sort, setSort] = useState<SortOrder>("newest");
 
   const approvedSet = useMemo(() => new Set(approvedIds), [approvedIds]);
 
   const visible = useMemo(
-    () => filterModels(models, { query, category, approval, approvedIds }),
-    [models, query, category, approval, approvedIds],
+    () => filterModels(models, { query, category, approval, approvedIds, sort }),
+    [models, query, category, approval, approvedIds, sort],
   );
 
   // The catalog itself being empty (FAL returned nothing) is distinct from a
@@ -89,6 +91,19 @@ export function ModelsBrowser({
             <option value="all">All</option>
             <option value="approved">Approved</option>
             <option value="not-approved">Not approved</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Sort</span>
+          <select
+            aria-label="Sort models"
+            value={sort}
+            onChange={(event) => setSort(event.target.value as SortOrder)}
+            className="rounded-md border border-border bg-background px-2 py-2 text-sm"
+          >
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="name">Name (A–Z)</option>
           </select>
         </label>
       </div>

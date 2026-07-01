@@ -17,6 +17,9 @@ export interface Model {
   description: string;
   tags: string[];
   thumbnailUrl?: string;
+  // FAL's `metadata.date` — when the model was added/published. ISO-8601, so
+  // it sorts chronologically as a plain string. May be absent on old entries.
+  addedAt?: string;
 }
 
 // The five categories that map onto a generation Mode. FAL's other categories
@@ -45,6 +48,7 @@ interface FalModelEntry {
     status?: string;
     tags?: string[];
     thumbnail_url?: string;
+    date?: string;
   };
 }
 
@@ -133,5 +137,6 @@ function toModel(entry: FalModelEntry, category: ModelCategory): Model {
     description: entry.metadata?.description ?? "",
     tags: entry.metadata?.tags ?? [],
     thumbnailUrl: entry.metadata?.thumbnail_url,
+    addedAt: entry.metadata?.date,
   };
 }

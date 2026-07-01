@@ -172,4 +172,20 @@ describe("ModelsBrowser (search and filters)", () => {
     expect(screen.queryByText("Kling Video")).not.toBeInTheDocument();
     expect(screen.getByText(/no models match/i)).toBeInTheDocument();
   });
+
+  it("orders newest-added first by default and flips when sorted oldest", async () => {
+    const old = model({ endpointId: "a", name: "Old Model", addedAt: "2025-01-01T00:00:00Z" });
+    const recent = model({ endpointId: "b", name: "Recent Model", addedAt: "2026-06-01T00:00:00Z" });
+    render(<ModelsBrowser models={[old, recent]} />);
+
+    const namesOf = () =>
+      screen.getAllByRole("listitem").map((li) => within(li).getByText(/Model$/).textContent);
+    expect(namesOf()).toEqual(["Recent Model", "Old Model"]);
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: /sort/i }),
+      "oldest",
+    );
+    expect(namesOf()).toEqual(["Old Model", "Recent Model"]);
+  });
 });
