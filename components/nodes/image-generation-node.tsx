@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import {
-  Handle,
   Position,
   useNodeConnections,
   useNodesData,
@@ -10,6 +9,7 @@ import {
   type NodeProps,
   type Node,
 } from "@xyflow/react";
+import { HandleBadge } from "@/components/nodes/handle-badge";
 import { generateImagePlaceholder } from "@/lib/generation-mock";
 import {
   appendEntry,
@@ -273,9 +273,21 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
       </button>
 
-      <Handle type="target" position={Position.Left} id="text" style={{ top: "35%" }} />
-      <Handle type="target" position={Position.Left} id="image" style={{ top: "65%" }} />
-      <Handle type="source" position={Position.Right} />
+      <HandleBadge
+        type="target"
+        position={Position.Left}
+        id="text"
+        dataType="text"
+        style={{ top: "35%" }}
+      />
+      <HandleBadge
+        type="target"
+        position={Position.Left}
+        id="image"
+        dataType="image"
+        style={{ top: "65%" }}
+      />
+      <HandleBadge type="source" position={Position.Right} dataType="image" />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { Handle, Position, useReactFlow, type NodeProps, type Node } from "@xyflow/react";
+import { Position, useReactFlow, type NodeProps, type Node } from "@xyflow/react";
+import { HandleBadge } from "@/components/nodes/handle-badge";
 
 export type StaticTextReferenceNodeData = {
   text: string;
@@ -30,7 +31,7 @@ export function StaticTextReferenceNode({ id, data }: NodeProps<StaticTextRefere
         data-node-id={id}
         placeholder="Enter text…"
       />
-      <Handle type="source" position={Position.Right} />
+      <HandleBadge type="source" position={Position.Right} dataType="text" />
     </div>
   );
 }

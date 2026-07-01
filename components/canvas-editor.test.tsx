@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import * as libraryActions from "@/app/library-actions";
 import { CanvasEditor } from "./canvas-editor";
 import type { Canvas } from "@/lib/canvas-repo";
 
@@ -249,5 +250,155 @@ describe("CanvasEditor connection validation", () => {
     // picked up by the Image Generation Node's Resolved Prompt preview —
     // proof the connection was accepted and consumed correctly.
     expect(await screen.findByText("a red car in a driveway")).toBeInTheDocument();
+  });
+});
+
+describe("CanvasEditor drag-to-spawn (Handle-Spawned Node, issue #17)", () => {
+  // Simulates a real connection drag ending on empty canvas: React Flow's
+  // Handle listens for a plain DOM mousedown, then XYHandle attaches
+  // document-level mousemove/mouseup listeners (@xyflow/system) that decide
+  // the drop target by proximity — dragging far from any handle leaves
+  // `toNode`/`toHandle` null, which is exactly the "dropped on empty pane"
+  // case onConnectEnd is meant to detect. This exercises the real library
+  // machinery rather than calling an internal handler directly.
+  async function dragFromHandleToEmptyCanvas(handle: Element) {
+    fireEvent.mouseDown(handle, { clientX: 100, clientY: 100, button: 0 });
+    fireEvent.mouseMove(document, { clientX: 900, clientY: 900 });
+    fireEvent.mouseUp(document, { clientX: 900, clientY: 900 });
+  }
+
+  it("opens a spawn picker listing only node types valid at the dragged handle", async () => {
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "ref1",
+              type: "staticTextReference",
+              position: { x: 0, y: 0 },
+              data: { text: "hello" },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    await screen.findByPlaceholderText("Enter text…");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const sourceHandle = container.querySelector(
+      '.react-flow__node[data-id="ref1"] .react-flow__handle.source',
+    ) as HTMLElement;
+    await dragFromHandleToEmptyCanvas(sourceHandle);
+
+    // A text-typed output is only valid at a Generation Node's `text`
+    // handle — never at a Static Media Reference, which has no input.
+    // Scoped to the picker menu itself, since "Static Text Reference" also
+    // legitimately appears in the origin node's own header.
+    const menu = await screen.findByRole("menu", { name: "Add a connected node" });
+    expect(within(menu).getByText("Image Generation Node")).toBeInTheDocument();
+    expect(within(menu).getByText("Video Generation Node")).toBeInTheDocument();
+    expect(within(menu).queryByText("Static Media Reference")).not.toBeInTheDocument();
+    expect(within(menu).queryByText("Static Text Reference")).not.toBeInTheDocument();
+  });
+
+  it("creates and auto-connects the chosen node when a candidate is picked", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "ref1",
+              type: "staticTextReference",
+              position: { x: 0, y: 0 },
+              data: { text: "hello" },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    await screen.findByPlaceholderText("Enter text…");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const sourceHandle = container.querySelector(
+      '.react-flow__node[data-id="ref1"] .react-flow__handle.source',
+    ) as HTMLElement;
+    await dragFromHandleToEmptyCanvas(sourceHandle);
+
+    await user.click(await screen.findByText("Image Generation Node"));
+
+    // The new Image Generation Node exists and its Resolved Prompt shows the
+    // dragged Static Text Reference's text, proving the edge landed on the
+    // `text` handle without the user drawing it by hand. Scoped to the
+    // Resolved Prompt heading's container since "hello" also appears
+    // verbatim in the origin Static Text Reference's own textarea.
+    const resolvedPromptHeading = await screen.findByText("Resolved Prompt");
+    expect(
+      within(resolvedPromptHeading.parentElement as HTMLElement).getByText("hello"),
+    ).toBeInTheDocument();
+  });
+
+  // Static Media Reference special case (issue #17 / ADR-0003): its output
+  // doesn't exist until an asset is chosen, so picking it from the spawn
+  // picker must not connect immediately — it opens the Asset Picker
+  // forced-open with a type hint, and the edge is only created once an
+  // asset is actually picked.
+  it("opens the Asset Picker forced-open with a type hint, and only connects once an asset is picked", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(libraryActions, "listAssetsAction").mockResolvedValue([
+      { url: "https://blob.example/cat.png", name: "cat.png", type: "image", uploadedAt: "2024-01-01" },
+      { url: "https://blob.example/clip.mp4", name: "clip.mp4", type: "video", uploadedAt: "2024-01-01" },
+    ]);
+
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 0, y: 0 },
+              data: { prompt: "", history: { entries: [], activeId: null } },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    await screen.findByPlaceholderText(/prompt/i);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Image Generation Node's `image` input handle: dragging from it (a
+    // target handle) yields staticMediaReference as a candidate (image is
+    // one of the two media types a Static Media Reference can hold).
+    const imageHandle = container.querySelector(
+      '.react-flow__node[data-id="gen1"] .react-flow__handle.target[data-handleid="image"]',
+    ) as HTMLElement;
+    await dragFromHandleToEmptyCanvas(imageHandle);
+
+    await user.click(await screen.findByText("Static Media Reference"));
+
+    // Forced-open (no "Choose asset" click needed) and restricted to image
+    // assets only — the video asset must not appear in the grid.
+    expect(await screen.findByRole("button", { name: "cat.png" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "clip.mp4" })).not.toBeInTheDocument();
+    });
+
+    // No edge yet — the connection is deferred until an asset is picked.
+    expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "cat.png" }));
+
+    // Picking the asset both renders it and creates the deferred edge.
+    expect(await screen.findByRole("img", { name: "cat.png" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(1);
+    });
   });
 });

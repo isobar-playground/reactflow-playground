@@ -46,7 +46,12 @@ export interface ConnectionAttemptEdge {
 
 // What data type each node type's output produces. References reject all
 // inbound edges, so they have no entry in `targetHandles` below.
-const SOURCE_DATA_TYPE: Record<NodeTypeKey, DataType | null> = {
+//
+// Exported (issue #17) so lib/handle-spawn.ts can walk the same type maps
+// when resolving Handle-Spawned Node candidates, rather than re-declaring
+// them — isConnectionAllowed's own logic and this map's contents are
+// otherwise unchanged.
+export const SOURCE_DATA_TYPE: Record<NodeTypeKey, DataType | null> = {
   staticTextReference: "text",
   staticMediaReference: null, // image or video, per-instance (issue #9): resolved via ConnectionAttempt.sourceDataType
   imageGeneration: "image",
@@ -56,7 +61,9 @@ const SOURCE_DATA_TYPE: Record<NodeTypeKey, DataType | null> = {
 // Which data types each target node type's named input handles accept.
 // Node types absent here (the two Reference kinds) accept no inbound edges
 // at all — References have an output handle only (CONTEXT.md).
-const TARGET_HANDLES: Partial<Record<NodeTypeKey, Record<string, DataType[]>>> = {
+//
+// Exported (issue #17) for lib/handle-spawn.ts — see SOURCE_DATA_TYPE above.
+export const TARGET_HANDLES: Partial<Record<NodeTypeKey, Record<string, DataType[]>>> = {
   imageGeneration: {
     text: ["text"],
     // image (issue #10): accepts images only — many allowed (a Static Media

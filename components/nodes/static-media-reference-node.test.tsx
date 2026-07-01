@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   ReactFlow,
@@ -68,8 +68,20 @@ describe("StaticMediaReferenceNode layout", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders exactly one handle, marked as a source (output only)", () => {
+  // ADR-0003: a Static Media Reference's output data type isn't known until
+  // an asset is chosen, so it has no connectable output at all before then
+  // — rendering an always-present Handle would offer a connection the graph
+  // already refuses (connection-rules.ts rejects a null sourceDataType).
+  it("renders no handle at all until an asset is chosen", () => {
     const { container } = renderNode();
+
+    expect(container.querySelectorAll(".react-flow__handle")).toHaveLength(0);
+  });
+
+  it("renders exactly one handle, marked as a source (output only), once an asset is chosen", () => {
+    const { container } = renderNode({
+      asset: { url: "https://blob.example/cat.png", name: "cat.png", type: "image", uploadedAt: "2024-01-01" },
+    });
 
     const handles = container.querySelectorAll(".react-flow__handle");
     expect(handles).toHaveLength(1);
@@ -168,5 +180,56 @@ describe("StaticMediaReferenceNode picker", () => {
       url: "https://blob.example/new-dog.png",
       name: "dog.png",
     });
+  });
+});
+
+describe("StaticMediaReferenceNode typeHint (Handle-Spawned Node, ADR-0003)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // A Handle-Spawned Static Media Reference (issue #17) opens its Asset
+  // Picker immediately with a type hint restricting the choice to the
+  // dragged handle's data type, so the user can't pick a mismatched asset.
+  it("excludes assets that don't match forcedOpenTypeHint from the rendered grid", async () => {
+    vi.spyOn(libraryActions, "listAssetsAction").mockResolvedValue([
+      { url: "https://blob.example/cat.png", name: "cat.png", type: "image", uploadedAt: "2024-01-01" },
+      { url: "https://blob.example/clip.mp4", name: "clip.mp4", type: "video", uploadedAt: "2024-01-01" },
+    ]);
+    renderInCanvas(
+      [
+        {
+          id: "n1",
+          type: "staticMediaReference",
+          position: { x: 0, y: 0 },
+          initialWidth: 260,
+          initialHeight: 220,
+          data: { asset: null, forcedOpenTypeHint: "video" },
+        },
+      ],
+    );
+
+    expect(await screen.findByRole("button", { name: "clip.mp4" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "cat.png" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("opens the picker immediately (forced open) when data.forcedOpenTypeHint is set, without a click", async () => {
+    vi.spyOn(libraryActions, "listAssetsAction").mockResolvedValue([]);
+    renderInCanvas(
+      [
+        {
+          id: "n1",
+          type: "staticMediaReference",
+          position: { x: 0, y: 0 },
+          initialWidth: 260,
+          initialHeight: 220,
+          data: { asset: null, forcedOpenTypeHint: "image" },
+        },
+      ],
+    );
+
+    expect(await screen.findByText(/choose an asset/i)).toBeInTheDocument();
   });
 });

@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import {
-  Handle,
   Position,
   useNodeConnections,
   useNodesData,
@@ -10,6 +9,7 @@ import {
   type NodeProps,
   type Node,
 } from "@xyflow/react";
+import { HandleBadge } from "@/components/nodes/handle-badge";
 import { generateVideoPlaceholder } from "@/lib/generation-mock";
 import {
   appendEntry,
@@ -241,12 +241,45 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
         {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
       </button>
 
-      <Handle type="target" position={Position.Left} id="text" style={{ top: "20%" }} />
-      <Handle type="target" position={Position.Left} id="startFrame" style={{ top: "35%" }} />
-      <Handle type="target" position={Position.Left} id="endFrame" style={{ top: "50%" }} />
-      <Handle type="target" position={Position.Left} id="imageReference" style={{ top: "65%" }} />
-      <Handle type="target" position={Position.Left} id="video" style={{ top: "80%" }} />
-      <Handle type="source" position={Position.Right} />
+      <HandleBadge
+        type="target"
+        position={Position.Left}
+        id="text"
+        dataType="text"
+        style={{ top: "20%" }}
+      />
+      <HandleBadge
+        type="target"
+        position={Position.Left}
+        id="startFrame"
+        dataType="image"
+        title="start frame"
+        style={{ top: "35%" }}
+      />
+      <HandleBadge
+        type="target"
+        position={Position.Left}
+        id="endFrame"
+        dataType="image"
+        title="end frame"
+        style={{ top: "50%" }}
+      />
+      <HandleBadge
+        type="target"
+        position={Position.Left}
+        id="imageReference"
+        dataType="image"
+        title="image reference"
+        style={{ top: "65%" }}
+      />
+      <HandleBadge
+        type="target"
+        position={Position.Left}
+        id="video"
+        dataType="video"
+        style={{ top: "80%" }}
+      />
+      <HandleBadge type="source" position={Position.Right} dataType="video" />
     </div>
   );
 }
