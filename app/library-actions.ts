@@ -1,9 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { uploadAsset } from "@/lib/asset-library";
+import { uploadAsset, listAssets } from "@/lib/asset-library";
 
 export async function uploadAssetAction(file: File) {
-  await uploadAsset(file);
+  const asset = await uploadAsset(file);
   revalidatePath("/library");
+  return asset;
+}
+
+export async function listAssetsAction() {
+  return listAssets();
 }

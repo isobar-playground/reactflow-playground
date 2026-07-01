@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
+import { Handle, Position, useReactFlow, type NodeProps, type Node } from "@xyflow/react";
 import {
   Dialog,
   DialogContent,
@@ -10,7 +10,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { listAssets, uploadAsset, type Asset } from "@/lib/asset-library";
+import { listAssetsAction, uploadAssetAction } from "@/app/library-actions";
+import type { Asset } from "@/lib/asset-library";
 
 export type StaticMediaReferenceNodeData = {
   asset: Asset | null;
@@ -22,9 +23,18 @@ export type StaticMediaReferenceNodeType = Node<StaticMediaReferenceNodeData, "s
 // handle and no input handle. Holds a single asset (image or video) chosen
 // from the shared Asset Library — media type is inferred from the file,
 // there's no prompt/generation (issue #9).
+//
+// ADR-0002: node `data` is the single source of truth for persisted canvas
+// content, so the chosen asset is rendered from `data.asset` and written
+// through with updateNodeData on select/upload rather than shadowed in
+// local state — otherwise it never reaches autosave and is lost on reload.
+// The picker itself goes through server actions (issue #15): a browser-side
+// import of lib/asset-library hits its own store and, in production, can
+// never reach Vercel Blob since BLOB_READ_WRITE_TOKEN is server-only.
 export function StaticMediaReferenceNode({ id, data }: NodeProps<StaticMediaReferenceNodeType>) {
-  const [asset, setAsset] = useState<Asset | null>(data.asset);
+  const { updateNodeData } = useReactFlow();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const asset = data.asset;
 
   return (
     <div className="w-64 rounded-lg border border-border bg-card p-3 shadow-sm" data-node-id={id}>
@@ -59,7 +69,7 @@ export function StaticMediaReferenceNode({ id, data }: NodeProps<StaticMediaRefe
         open={pickerOpen}
         onOpenChange={setPickerOpen}
         onSelect={(selected) => {
-          setAsset(selected);
+          updateNodeData(id, { asset: selected });
           setPickerOpen(false);
         }}
       />
@@ -86,12 +96,12 @@ function AssetPickerDialog({
 
   useEffect(() => {
     if (!open) return;
-    void listAssets().then(setAssets);
+    void listAssetsAction().then(setAssets);
   }, [open]);
 
   async function handleUpload(file: File) {
     setIsUploading(true);
-    const uploaded = await uploadAsset(file);
+    const uploaded = await uploadAssetAction(file);
     setIsUploading(false);
     onSelect(uploaded);
   }
