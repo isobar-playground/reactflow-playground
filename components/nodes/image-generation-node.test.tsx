@@ -523,12 +523,11 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
     expect(screen.getByRole("spinbutton", { name: /variant/i })).toHaveValue(1);
   });
 
-  it("clones the node into that many independent nodes when the counter is above one and Generate is clicked", async () => {
+  it("clones (count - 1) siblings beside the node when the counter is above one and Generate is clicked", async () => {
     const generate = vi
       .spyOn(generationMock, "generateImagePlaceholder")
       .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c1/768/768" })
-      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c2/768/768" })
-      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c3/768/768" });
+      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c2/768/768" });
     const user = userEvent.setup();
     renderInCanvas([
       {
@@ -546,23 +545,22 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
     await user.type(counter, "3");
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
+    // A counter of 3 means 3 variants *total* — this node counts as one of
+    // them, so only 2 new siblings are cloned beside it.
     await waitFor(() => {
-      expect(generate).toHaveBeenCalledTimes(3);
+      expect(generate).toHaveBeenCalledTimes(2);
     });
 
-    // Three sibling nodes now exist in the graph, each showing its own
-    // freshly generated output — not a copy of any shared History. The
-    // original itself gets no new History entry of its own: cloning
-    // replaces its generation rather than adding a fourth entry alongside
-    // the clones.
     await waitFor(() => {
-      expect(screen.getAllByRole("img", { name: "Generation output" })).toHaveLength(3);
+      expect(document.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(3);
+    });
+    await waitFor(() => {
+      expect(screen.getAllByRole("img", { name: "Generation output" })).toHaveLength(2);
     });
     const outputs = screen.getAllByRole("img", { name: "Generation output" });
     expect(outputs.map((img) => img.getAttribute("src")).sort()).toEqual([
       "https://picsum.photos/seed/c1/768/768",
       "https://picsum.photos/seed/c2/768/768",
-      "https://picsum.photos/seed/c3/768/768",
     ]);
   });
 
@@ -658,7 +656,7 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
     const gen1Container = document.querySelector('[data-node-id="gen1"]') as HTMLElement;
     const counter = within(gen1Container).getByRole("spinbutton", { name: /variant/i });
     await user.clear(counter);
-    await user.type(counter, "2");
+    await user.type(counter, "3");
     await user.click(within(gen1Container).getByRole("button", { name: "Generate" }));
 
     // The two clones are new imageGeneration nodes distinct from gen1 and

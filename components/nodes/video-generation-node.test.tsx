@@ -268,7 +268,7 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
     expect(screen.getByRole("spinbutton", { name: /variant/i })).toHaveValue(1);
   });
 
-  it("clones the node into that many independent nodes when the counter is above one and Generate is clicked", async () => {
+  it("clones (count - 1) siblings beside the node when the counter is above one and Generate is clicked", async () => {
     const generate = vi
       .spyOn(generationMock, "generateVideoPlaceholder")
       .mockResolvedValue({ kind: "video", url: "/sample-video.mp4" });
@@ -289,14 +289,17 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
     await user.type(counter, "3");
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
+    // A counter of 3 means 3 variants *total* — this node counts as one of
+    // them, so only 2 new siblings are cloned beside it.
     await waitFor(() => {
-      expect(generate).toHaveBeenCalledTimes(3);
+      expect(generate).toHaveBeenCalledTimes(2);
     });
 
-    // Three sibling nodes now exist in the graph, each with its own freshly
-    // generated video output — not a copy of any shared History.
     await waitFor(() => {
-      expect(container.querySelectorAll("video")).toHaveLength(3);
+      expect(container.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(3);
+    });
+    await waitFor(() => {
+      expect(container.querySelectorAll("video")).toHaveLength(2);
     });
   });
 
@@ -365,7 +368,7 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
     const gen1Container = document.querySelector('[data-node-id="gen1"]') as HTMLElement;
     const counter = within(gen1Container).getByRole("spinbutton", { name: /variant/i });
     await user.clear(counter);
-    await user.type(counter, "2");
+    await user.type(counter, "3");
     await user.click(within(gen1Container).getByRole("button", { name: "Generate" }));
 
     await waitFor(() => {

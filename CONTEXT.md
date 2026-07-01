@@ -43,7 +43,7 @@ _Avoid_: Variants, gallery
 The currently-selected History entry of a Generation Node. It is what the node displays, and what downstream nodes consume when this node is used as a reference.
 
 **Variant / Clone**:
-When a Generation Node's variant count is set above one and generation is triggered, the node clones itself into that many independent nodes. Each clone inherits the incoming reference edges of the original.
+When a Generation Node's variant count is set above one and generation is triggered, the count is the total number of variants — the node itself is one of them, so (count - 1) new sibling nodes are cloned beside it. Each clone inherits the incoming reference edges of the original.
 _Avoid_: Copy, duplicate
 
 **Handle-Spawned Node**:

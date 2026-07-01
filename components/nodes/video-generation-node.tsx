@@ -89,11 +89,12 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
   const { getNode, getEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
 
   // Variant cloning (CONTEXT.md / issue #12): when the counter is above one,
-  // Generate clones this node into that many independent nodes instead of
-  // appending to its own History. Each clone inherits only the original's
-  // incoming edges (lib/variant-clone.ts), is laid out with an offset, and
-  // generates its own single fresh output — never a copy of this node's
-  // History. The counter resets to 1 afterward. Mirrors
+  // Generate adds (count - 1) sibling clones beside this node instead of
+  // appending to its own History — the counter is the total number of
+  // variants, and this node is already one of them. Each clone inherits only
+  // the original's incoming edges (lib/variant-clone.ts), is laid out with an
+  // offset, and generates its own single fresh output — never a copy of this
+  // node's History. The counter resets to 1 afterward. Mirrors
   // components/nodes/image-generation-node.tsx's handleGenerateVariants.
   //
   // ADR-0002: getNode(id) already returns the live `data.prompt` — the
@@ -106,7 +107,7 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
       setIsGenerating(false);
       return;
     }
-    const { nodes: clones, edges: clonedEdges } = cloneVariants(node, getEdges(), count);
+    const { nodes: clones, edges: clonedEdges } = cloneVariants(node, getEdges(), count - 1);
 
     const generated = await Promise.all(clones.map(() => generateVideoPlaceholder()));
     const clonesWithOutput = clones.map((clone, index) => ({
@@ -162,22 +163,24 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
         </span>
       </div>
 
-      <div className="mb-3 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg bg-muted">
-        {isGenerating ? (
-          <span className="text-sm text-muted-foreground">Generating…</span>
-        ) : activeEntry ? (
-          <video
-            src={activeEntry.output.url}
-            className="h-full w-full object-cover"
-            autoPlay
-            loop
-            muted
-            playsInline
-          />
-        ) : (
-          <span className="text-sm text-muted-foreground">No output yet</span>
-        )}
-      </div>
+      {/* Output box: only takes up space once there's something to show —
+          a fresh node has no "no output yet" placeholder. */}
+      {(isGenerating || activeEntry) && (
+        <div className="mb-3 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg bg-muted">
+          {isGenerating ? (
+            <span className="text-sm text-muted-foreground">Generating…</span>
+          ) : (
+            <video
+              src={activeEntry!.output.url}
+              className="h-full w-full object-cover"
+              autoPlay
+              loop
+              muted
+              playsInline
+            />
+          )}
+        </div>
+      )}
 
       {/* History carousel (CONTEXT.md): only appears from the second entry
           onward, so the node stays simple until there's history. */}

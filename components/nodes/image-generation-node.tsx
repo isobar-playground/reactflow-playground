@@ -85,11 +85,12 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   const { getNode, getEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
 
   // Variant cloning (CONTEXT.md / issue #12): when the counter is above one,
-  // Generate clones this node into that many independent nodes instead of
-  // appending to its own History. Each clone inherits only the original's
-  // incoming edges (lib/variant-clone.ts), is laid out with an offset, and
-  // generates its own single fresh output — never a copy of this node's
-  // History. The counter resets to 1 afterward.
+  // Generate adds (count - 1) sibling clones beside this node instead of
+  // appending to its own History — the counter is the total number of
+  // variants, and this node is already one of them. Each clone inherits only
+  // the original's incoming edges (lib/variant-clone.ts), is laid out with an
+  // offset, and generates its own single fresh output — never a copy of this
+  // node's History. The counter resets to 1 afterward.
   //
   // ADR-0002: getNode(id) already returns the live `data.prompt` — the
   // prompt field writes through on every keystroke — so no manual merge of
@@ -101,7 +102,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
       setIsGenerating(false);
       return;
     }
-    const { nodes: clones, edges: clonedEdges } = cloneVariants(node, getEdges(), count);
+    const { nodes: clones, edges: clonedEdges } = cloneVariants(node, getEdges(), count - 1);
 
     const generated = await Promise.all(clones.map(() => generateImagePlaceholder()));
     const clonesWithOutput = clones.map((clone, index) => ({
@@ -157,20 +158,22 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         </span>
       </div>
 
-      <div className="mb-3 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg bg-muted">
-        {isGenerating ? (
-          <span className="text-sm text-muted-foreground">Generating…</span>
-        ) : activeEntry ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={activeEntry.output.url}
-            alt="Generation output"
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <span className="text-sm text-muted-foreground">No output yet</span>
-        )}
-      </div>
+      {/* Output box: only takes up space once there's something to show —
+          a fresh node has no "no output yet" placeholder. */}
+      {(isGenerating || activeEntry) && (
+        <div className="mb-3 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg bg-muted">
+          {isGenerating ? (
+            <span className="text-sm text-muted-foreground">Generating…</span>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={activeEntry!.output.url}
+              alt="Generation output"
+              className="h-full w-full object-cover"
+            />
+          )}
+        </div>
+      )}
 
       {/* History carousel (CONTEXT.md): only appears from the second entry
           onward, so the node stays simple until there's history. */}
