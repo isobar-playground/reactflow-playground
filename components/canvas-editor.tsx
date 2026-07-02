@@ -43,6 +43,7 @@ import {
 import { resolveSpawnCandidates, type SpawnCandidate } from "@/lib/handle-spawn";
 import type { Canvas } from "@/lib/canvas-repo";
 import type { ImageGenerationNodeData } from "@/components/nodes/image-generation-node";
+import type { VideoGenerationNodeData } from "@/components/nodes/video-generation-node";
 
 const AUTOSAVE_DELAY_MS = 1500;
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
@@ -94,15 +95,16 @@ function draggedHandleDataType(
   return accepted?.[0];
 }
 
-// Per-instance target handles (ADR-0007/ADR-0008, issue #30): an Image
-// Generation Node's Input Handles come from its selected Model's snapshotted
-// schema, not the static TARGET_HANDLES map — this reads that snapshot off
-// the node's own data. Returns undefined for node types not yet migrated
-// (videoGeneration, until issue #31), so isConnectionAllowed falls back to
-// the static map for those.
+// Per-instance target handles (ADR-0007/ADR-0008, issues #30/#31): a
+// Generation Node's Input Handles come from its selected Model's
+// snapshotted schema, not the static TARGET_HANDLES map — this reads that
+// snapshot off the node's own data. Both Generation Node types are fully
+// migrated as of issue #31, so this always returns a resolved (possibly
+// empty) handle map for them; other node types fall back to the static map
+// in isConnectionAllowed via undefined.
 function targetHandlesOf(node: Node): Record<string, TargetHandleSpec> | undefined {
-  if (node.type !== "imageGeneration") return undefined;
-  const data = node.data as ImageGenerationNodeData;
+  if (node.type !== "imageGeneration" && node.type !== "videoGeneration") return undefined;
+  const data = node.data as ImageGenerationNodeData | VideoGenerationNodeData;
   const handles = data.model?.handles ?? [];
   const resolved: Record<string, TargetHandleSpec> = {
     // `text` is the node's fixed prompt mechanism (ADR-0007) — present

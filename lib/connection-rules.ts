@@ -45,7 +45,9 @@ export interface ConnectionAttempt {
    * attempt — including an empty object, which correctly rejects every
    * handle for a node with no Model selected yet. Omitted (undefined) falls
    * back to the static map, for node types not yet migrated to per-instance
-   * handles (videoGeneration, until issue #31).
+   * handles. As of issue #31 both Generation Node types pass this on every
+   * attempt from the canvas; the static map below remains only as a
+   * fallback for callers (e.g. direct unit tests) that don't supply it.
    */
   targetHandles?: Record<string, TargetHandleSpec>;
 }

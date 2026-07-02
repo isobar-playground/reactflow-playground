@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
@@ -11,9 +11,16 @@ import {
   type Node,
 } from "@xyflow/react";
 import * as generationMock from "@/lib/generation-mock";
+import * as modelsActions from "@/app/models-actions";
+import * as falSchema from "@/lib/fal-schema";
 import { VideoGenerationNode, type VideoGenerationNodeData } from "./video-generation-node";
 import { StaticTextReferenceNode } from "./static-text-reference-node";
 import { StaticMediaReferenceNode } from "./static-media-reference-node";
+import type { Model } from "@/lib/fal-models";
+
+vi.mock("@/app/models-actions", () => ({
+  approvedModelsForKind: vi.fn().mockResolvedValue([]),
+}));
 
 const nodeTypes = {
   videoGeneration: VideoGenerationNode,
@@ -83,17 +90,13 @@ describe("VideoGenerationNode layout", () => {
     expect(screen.getByRole("button", { name: "Generate" })).toBeInTheDocument();
   });
 
-  it("renders a source output handle plus the five named target handles", () => {
+  it("renders a source output handle and no target handles before a Model is selected", () => {
     const { container } = renderNode();
 
     const sourceHandles = container.querySelectorAll(".react-flow__handle.source");
     expect(sourceHandles).toHaveLength(1);
-
-    for (const handleId of ["text", "startFrame", "endFrame", "imageReference", "video"]) {
-      expect(
-        container.querySelector(`.react-flow__handle[data-handleid="${handleId}"]`),
-      ).not.toBeNull();
-    }
+    const targetHandles = container.querySelectorAll(".react-flow__handle.target");
+    expect(targetHandles).toHaveLength(0);
   });
 });
 
@@ -142,90 +145,10 @@ describe("VideoGenerationNode generation", () => {
 });
 
 describe("VideoGenerationNode mode (issue #11)", () => {
-  it("shows the text-to-video mode label when nothing else is connected", () => {
+  it("falls back to the connection-derived text-to-video label when no Model is selected", () => {
     renderNode();
 
     expect(screen.getByText("Text → Video")).toBeInTheDocument();
-  });
-
-  it("switches to image-to-video when a startFrame is connected", () => {
-    const nodes: Node[] = [
-      {
-        id: "media1",
-        type: "staticMediaReference",
-        position: { x: 0, y: 0 },
-        initialWidth: 200,
-        initialHeight: 200,
-        data: { asset: { url: "https://example.com/a.png", name: "a.png", type: "image" } },
-      },
-      {
-        id: "gen1",
-        type: "videoGeneration",
-        position: { x: 300, y: 0 },
-        initialWidth: 400,
-        initialHeight: 500,
-        data: { prompt: "", history: { entries: [], activeId: null } },
-      },
-    ];
-    const edges: Edge[] = [{ id: "e1", source: "media1", target: "gen1", targetHandle: "startFrame" }];
-
-    renderWithNodes(nodes, edges);
-
-    expect(screen.getByText("Image → Video")).toBeInTheDocument();
-  });
-
-  it("switches to image-to-video when an imageReference is connected", () => {
-    const nodes: Node[] = [
-      {
-        id: "media1",
-        type: "staticMediaReference",
-        position: { x: 0, y: 0 },
-        initialWidth: 200,
-        initialHeight: 200,
-        data: { asset: { url: "https://example.com/a.png", name: "a.png", type: "image" } },
-      },
-      {
-        id: "gen1",
-        type: "videoGeneration",
-        position: { x: 300, y: 0 },
-        initialWidth: 400,
-        initialHeight: 500,
-        data: { prompt: "", history: { entries: [], activeId: null } },
-      },
-    ];
-    const edges: Edge[] = [
-      { id: "e1", source: "media1", target: "gen1", targetHandle: "imageReference" },
-    ];
-
-    renderWithNodes(nodes, edges);
-
-    expect(screen.getByText("Image → Video")).toBeInTheDocument();
-  });
-
-  it("switches to video-to-video when a video is connected", () => {
-    const nodes: Node[] = [
-      {
-        id: "media1",
-        type: "staticMediaReference",
-        position: { x: 0, y: 0 },
-        initialWidth: 200,
-        initialHeight: 200,
-        data: { asset: { url: "https://example.com/a.mp4", name: "a.mp4", type: "video" } },
-      },
-      {
-        id: "gen1",
-        type: "videoGeneration",
-        position: { x: 300, y: 0 },
-        initialWidth: 400,
-        initialHeight: 500,
-        data: { prompt: "", history: { entries: [], activeId: null } },
-      },
-    ];
-    const edges: Edge[] = [{ id: "e1", source: "media1", target: "gen1", targetHandle: "video" }];
-
-    renderWithNodes(nodes, edges);
-
-    expect(screen.getByText("Video → Video")).toBeInTheDocument();
   });
 });
 
@@ -246,7 +169,16 @@ describe("VideoGenerationNode text handle and Resolved Prompt", () => {
         position: { x: 300, y: 0 },
         initialWidth: 400,
         initialHeight: 500,
-        data: { prompt: "driving fast", history: { entries: [], activeId: null } },
+        data: {
+          prompt: "driving fast",
+          history: { entries: [], activeId: null },
+          model: {
+            endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+            name: "Kling Video",
+            category: "image-to-video",
+            handles: [],
+          },
+        },
       },
     ];
     const edges: Edge[] = [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }];
@@ -564,5 +496,325 @@ describe("VideoGenerationNode persistence", () => {
       expect(data.history.activeId).toBe(data.history.entries[0].id);
       expect(data.history.entries).toHaveLength(2);
     });
+  });
+});
+
+describe("VideoGenerationNode Model picker (issue #31)", () => {
+  const kling: Model = {
+    endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+    name: "Kling Video v3 Pro",
+    category: "image-to-video",
+    description: "",
+    tags: [],
+  };
+  const veo: Model = {
+    endpointId: "fal-ai/veo/text-to-video",
+    name: "Veo Text-to-Video",
+    category: "text-to-video",
+    description: "",
+    tags: [],
+  };
+
+  // Mirrors ImageGenerationNode's #29/#30 tests: selecting a Model also
+  // fetches its schema to derive and snapshot handles, so stub a schema
+  // with no media inputs to keep the picker/label bookkeeping tests
+  // focused and network-free.
+  beforeEach(() => {
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({ paths: {}, components: {} });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("lists only Approved video-output Models fetched via approvedModelsForKind", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling, veo]);
+    renderNode();
+
+    expect(modelsActions.approvedModelsForKind).toHaveBeenCalledWith("video");
+    expect(await screen.findByRole("option", { name: "Kling Video v3 Pro" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Veo Text-to-Video" })).toBeInTheDocument();
+  });
+
+  it("shows a 'select a model' state before a Model is chosen", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling]);
+    renderNode();
+
+    await screen.findByRole("option", { name: "Kling Video v3 Pro" });
+    expect(screen.getByText(/select a model to configure/i)).toBeInTheDocument();
+  });
+
+  it("shows an empty hint pointing at /models when there are no Approved video Models", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([]);
+    renderNode();
+
+    const hint = await screen.findByText(/no approved.*models/i);
+    expect(hint).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /models/i });
+    expect(link).toHaveAttribute("href", "/models");
+  });
+
+  it("selecting a Model stores endpointId, name and category in node data via updateNodeData", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling, veo]);
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "", history: { entries: [], activeId: null } },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    await screen.findByRole("option", { name: "Kling Video v3 Pro" });
+    const picker = screen.getByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/kling-video/v3/pro/image-to-video");
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.model).toEqual({
+        endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+        name: "Kling Video v3 Pro",
+        category: "image-to-video",
+        handles: [],
+      });
+    });
+  });
+
+  it("shows the selected Model's category as the node's label instead of the connection-derived mode", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling, veo]);
+    const user = userEvent.setup();
+    renderNode();
+
+    await screen.findByRole("option", { name: "Kling Video v3 Pro" });
+    expect(screen.getByText("Text → Video")).toBeInTheDocument();
+
+    const picker = screen.getByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/kling-video/v3/pro/image-to-video");
+
+    await waitFor(() => {
+      expect(screen.getByText("Image → Video")).toBeInTheDocument();
+    });
+  });
+
+  it("restores a saved Model selection on reload without refetching the picker's answer", () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling]);
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+        name: "Kling Video v3 Pro",
+        category: "image-to-video",
+        handles: [],
+      },
+    });
+
+    expect(screen.getByText("Image → Video")).toBeInTheDocument();
+    expect(screen.queryByText(/select a model/i)).not.toBeInTheDocument();
+  });
+
+  it("preserves the selected Model when the node is cloned as a Variant", async () => {
+    vi.spyOn(generationMock, "generateVideoPlaceholder").mockResolvedValue({
+      kind: "video",
+      url: "/sample-video.mp4",
+    });
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling]);
+    const user = userEvent.setup();
+    renderInCanvas([
+      {
+        id: "n1",
+        type: "videoGeneration",
+        position: { x: 0, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: {
+          prompt: "",
+          history: { entries: [], activeId: null },
+          model: {
+            endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+            name: "Kling Video v3 Pro",
+            category: "image-to-video",
+            handles: [],
+          },
+        },
+      },
+    ]);
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "2");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(2);
+    });
+    const labels = screen.getAllByText("Image → Video");
+    expect(labels).toHaveLength(2);
+  });
+});
+
+describe("VideoGenerationNode schema-derived Input Handles (issue #31)", () => {
+  const kling: Model = {
+    endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+    name: "Kling Video v3 Pro",
+    category: "image-to-video",
+    description: "",
+    tags: [],
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("renders no input handles before a Model is selected", () => {
+    const { container } = renderNode();
+
+    const targetHandles = container.querySelectorAll(".react-flow__handle.target");
+    expect(targetHandles).toHaveLength(0);
+    expect(container.querySelectorAll(".react-flow__handle.source")).toHaveLength(1);
+  });
+
+  it("fetches the selected Model's schema and snapshots the resolved handles into node data", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling]);
+    const fetchSchema = vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({
+      paths: {
+        "/fal-ai/kling-video/v3/pro/image-to-video": {
+          post: {
+            requestBody: {
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/KlingInput" } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          KlingInput: {
+            properties: {
+              start_image_url: { type: "string" },
+              end_image_url: { type: "string" },
+            },
+          },
+        },
+      },
+    });
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "", history: { entries: [], activeId: null } },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    await screen.findByRole("option", { name: "Kling Video v3 Pro" });
+    const picker = screen.getByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/kling-video/v3/pro/image-to-video");
+
+    expect(fetchSchema).toHaveBeenCalledWith("fal-ai/kling-video/v3/pro/image-to-video");
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.model?.handles).toEqual(
+        expect.arrayContaining([
+          { handleId: "start_image_url", label: "start_image_url", dataType: "image", many: false },
+          { handleId: "end_image_url", label: "end_image_url", dataType: "image", many: false },
+        ]),
+      );
+    });
+  });
+
+  it("renders a handle for each snapshotted entry", () => {
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+        name: "Kling Video v3 Pro",
+        category: "image-to-video",
+        handles: [
+          { handleId: "start_image_url", label: "start_image_url", dataType: "image", many: false },
+          { handleId: "end_image_url", label: "end_image_url", dataType: "image", many: false },
+        ],
+      },
+    });
+
+    expect(
+      document.querySelector('.react-flow__handle[data-handleid="start_image_url"]'),
+    ).not.toBeNull();
+    expect(
+      document.querySelector('.react-flow__handle[data-handleid="end_image_url"]'),
+    ).not.toBeNull();
+    expect(document.querySelector('.react-flow__handle[data-handleid="text"]')).not.toBeNull();
+  });
+
+  it("renders handles from the snapshot on reload without re-contacting FAL", () => {
+    const fetchSchema = vi.spyOn(falSchema, "fetchModelInputSchema");
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+        name: "Kling Video v3 Pro",
+        category: "image-to-video",
+        handles: [
+          { handleId: "start_image_url", label: "start_image_url", dataType: "image", many: false },
+        ],
+      },
+    });
+
+    expect(
+      document.querySelector('.react-flow__handle[data-handleid="start_image_url"]'),
+    ).not.toBeNull();
+    expect(fetchSchema).not.toHaveBeenCalled();
   });
 });

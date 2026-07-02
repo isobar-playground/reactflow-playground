@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Position,
   useNodeConnections,
@@ -20,23 +21,31 @@ import {
   type NodeHistory,
 } from "@/lib/node-history";
 import { resolvedPrompt } from "@/lib/resolved-prompt";
-import { videoGenerationMode, videoGenerationModeLabel } from "@/lib/generation-mode";
+import { videoGenerationMode, videoGenerationModeLabel, modelCategoryLabel } from "@/lib/generation-mode";
 import { cloneVariants } from "@/lib/variant-clone";
+import { approvedModelsForKind } from "@/app/models-actions";
+import type { Model } from "@/lib/fal-models";
+import { fetchModelInputSchema, deriveInputHandles, type ResolvedHandle } from "@/lib/fal-schema";
 import type { StaticTextReferenceNodeData } from "@/components/nodes/static-text-reference-node";
+import type { SelectedModel } from "@/components/nodes/image-generation-node";
 
 export type VideoGenerationNodeData = {
   prompt: string;
   history: NodeHistory;
+  model?: SelectedModel | null;
 };
 
 export type VideoGenerationNodeType = Node<VideoGenerationNodeData, "videoGeneration">;
 
-// The Video Generation Node (CONTEXT.md / issue #11): a Generation Node
-// whose output is a video. Named input handles: `text` (many), `start
-// frame`/`end frame` (one image each), `image reference` (many images),
-// `video` (one video, mutually exclusive with the other three — enforced by
-// lib/connection-rules.ts). Mode is derived, never chosen by hand, mirroring
-// the Image Generation Node's pattern (components/nodes/image-generation-node.tsx).
+// The Video Generation Node (CONTEXT.md / issue #11, reshaped by issue #31 /
+// ADR-0007): a Generation Node whose output is a video. Until issue #31 it
+// had fixed, hand-declared input handles (`startFrame`/`endFrame`/
+// `imageReference`/`video`) and a connection-derived mode. It now mirrors
+// the Image Generation Node's pattern (components/nodes/image-generation-node.tsx,
+// issues #29/#30): a Model picker beside Variants lists Approved
+// video-output Models; selecting one snapshots that Model's schema-derived
+// Input Handles into `data.model`, which the node renders from — no input
+// handles at all until a Model is selected.
 //
 // ADR-0002: the prompt field and History are both controlled from `data`
 // and write through with updateNodeData on every change rather than
@@ -58,6 +67,24 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
   const variantCount = Math.max(1, parseInt(variantCountInput, 10) || 1);
 
   const activeEntry = getActiveEntry(history);
+  const selectedModel = data.model;
+
+  // Model picker (CONTEXT.md's Model / issue #31): the picker's own list is
+  // just names/thumbnails from the live catalog joined against approvals —
+  // no per-model schema fetch here (lazy, at selection, per ADR-0008).
+  // Fetched once per node mount; the picker only ever needs to show
+  // "Approved video-output Models," which doesn't change within a node's
+  // lifetime on the canvas.
+  const [approvedModels, setApprovedModels] = useState<Model[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void approvedModelsForKind("video").then((models) => {
+      if (!cancelled) setApprovedModels(models);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Resolved Prompt (CONTEXT.md): the text of all connected Static Text
   // References, in edge order, concatenated with the local prompt field.
@@ -70,9 +97,11 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
   const connectedTexts = connectedTextNodeIds.map((nodeId) => connectedTextByNodeId.get(nodeId) ?? "");
   const resolvedPromptText = resolvedPrompt(connectedTexts, prompt);
 
-  // Mode (CONTEXT.md / issue #11): derived from which inputs are connected —
-  // never chosen by hand. A connected video takes priority (connection-rules
-  // blocks it from coexisting with the frame/image-reference handles).
+  // Label (CONTEXT.md's Model / ADR-0007, issue #31): once a Model is
+  // selected, its category is the node's label — a property of the chosen
+  // Model, not derived from connections. Falls back to the old
+  // connection-derived mode label (issue #11) only while no Model is chosen
+  // yet, so a fresh node still communicates something before its first pick.
   const startFrameConnections = useNodeConnections({ id, handleType: "target", handleId: "startFrame" });
   const endFrameConnections = useNodeConnections({ id, handleType: "target", handleId: "endFrame" });
   const imageReferenceConnections = useNodeConnections({
@@ -86,7 +115,17 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
     endFrameConnections.length > 0 ||
     imageReferenceConnections.length > 0;
   const mode = videoGenerationMode({ hasImageInput, hasVideo: videoConnections.length > 0 });
-  const modeLabel = videoGenerationModeLabel(mode);
+  const modeLabel = selectedModel
+    ? modelCategoryLabel(selectedModel.category)
+    : videoGenerationModeLabel(mode);
+
+  // Input Handle layout (ADR-0007 / ADR-0008 / issue #31): `text` is the
+  // node's fixed prompt mechanism — present whenever a Model is selected,
+  // never itself schema-derived — followed by one handle per entry in the
+  // Model's snapshotted, schema-derived handle set, in schema order.
+  const inputHandleLayout: ResolvedHandle[] = selectedModel
+    ? [{ handleId: "text", label: "text", dataType: "text", many: true }, ...selectedModel.handles]
+    : [];
 
   const { getNode, getEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
   const { duplicate, remove } = useNodeActions(id);
@@ -239,7 +278,64 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
           onBlur={() => setVariantCountInput(String(variantCount))}
           className="nodrag w-16 rounded-md border border-border bg-background p-1 text-sm outline-none"
         />
+
+        {/* Model picker (CONTEXT.md's Model / issue #31): lists Approved
+            video-output Models only. Selecting one writes endpointId, name
+            and category through to data.model (ADR-0002), and lazily
+            fetches that one endpoint's FAL input schema, derives its Input
+            Handles, and snapshots them alongside it (ADR-0008). The
+            snapshot is what the handles below render from; it's never
+            re-derived live on load. */}
+        {approvedModels && approvedModels.length > 0 && (
+          <select
+            aria-label="Model"
+            className="nodrag flex-1 rounded-md border border-border bg-background p-1 text-sm outline-none"
+            value={selectedModel?.endpointId ?? ""}
+            onChange={(event) => {
+              const chosen = approvedModels.find((m) => m.endpointId === event.target.value);
+              if (!chosen) {
+                updateNodeData(id, { model: null });
+                return;
+              }
+              void fetchModelInputSchema(chosen.endpointId).then((schema) => {
+                const handles = deriveInputHandles(schema, chosen.endpointId);
+                updateNodeData(id, {
+                  model: {
+                    endpointId: chosen.endpointId,
+                    name: chosen.name,
+                    category: chosen.category,
+                    handles,
+                  },
+                });
+              });
+            }}
+          >
+            <option value="">Select a model…</option>
+            {approvedModels.map((m) => (
+              <option key={m.endpointId} value={m.endpointId}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
+
+      {/* No-model / empty-picker states (issue #31): a fetched-but-empty
+          catalog points the author at /models rather than showing a picker
+          with nothing in it; otherwise, an unselected picker gets a plain
+          text nudge alongside the dropdown above. */}
+      {approvedModels && approvedModels.length === 0 && (
+        <p className="mb-3 text-xs text-muted-foreground">
+          No approved video models yet — approve one on{" "}
+          <Link href="/models" className="underline">
+            /models
+          </Link>
+          .
+        </p>
+      )}
+      {approvedModels && approvedModels.length > 0 && !selectedModel && (
+        <p className="mb-3 text-xs text-muted-foreground">Select a model to configure this node.</p>
+      )}
 
       <button
         type="button"
@@ -250,44 +346,22 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
         {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
       </button>
 
-      <HandleBadge
-        type="target"
-        position={Position.Left}
-        id="text"
-        dataType="text"
-        style={{ top: "20%" }}
-      />
-      <HandleBadge
-        type="target"
-        position={Position.Left}
-        id="startFrame"
-        dataType="image"
-        title="start frame"
-        style={{ top: "35%" }}
-      />
-      <HandleBadge
-        type="target"
-        position={Position.Left}
-        id="endFrame"
-        dataType="image"
-        title="end frame"
-        style={{ top: "50%" }}
-      />
-      <HandleBadge
-        type="target"
-        position={Position.Left}
-        id="imageReference"
-        dataType="image"
-        title="image reference"
-        style={{ top: "65%" }}
-      />
-      <HandleBadge
-        type="target"
-        position={Position.Left}
-        id="video"
-        dataType="video"
-        style={{ top: "80%" }}
-      />
+      {/* Input Handles (ADR-0007 / ADR-0008 / issue #31): none until a Model
+          is selected. Once selected, `text` stays the node's fixed prompt
+          mechanism (not schema-derived — ADR-0007), followed by one handle
+          per entry in the Model's snapshotted schema-derived handle set,
+          evenly spaced down the left edge. */}
+      {selectedModel &&
+        inputHandleLayout.map(({ handleId, dataType }, index) => (
+          <HandleBadge
+            key={handleId}
+            type="target"
+            position={Position.Left}
+            id={handleId}
+            dataType={dataType}
+            style={{ top: `${((index + 1) / (inputHandleLayout.length + 1)) * 100}%` }}
+          />
+        ))}
       <HandleBadge type="source" position={Position.Right} dataType="video" />
     </div>
   );
