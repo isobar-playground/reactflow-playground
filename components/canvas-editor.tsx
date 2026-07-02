@@ -41,6 +41,7 @@ import {
   type TargetHandleSpec,
 } from "@/lib/connection-rules";
 import { resolveSpawnCandidates, type SpawnCandidate } from "@/lib/handle-spawn";
+import { firstCompatibleHandle } from "@/lib/edge-reconcile";
 import type { Canvas } from "@/lib/canvas-repo";
 import type { ImageGenerationNodeData } from "@/components/nodes/image-generation-node";
 import type { VideoGenerationNodeData } from "@/components/nodes/video-generation-node";
@@ -174,6 +175,24 @@ interface PendingMediaSpawn {
   direction: "source" | "target";
 }
 
+// A Handle-Spawned Generation Node whose Model hasn't been picked yet
+// (ADR-0007/ADR-0008, issue #34): it has no input handles until a Model is
+// selected, so the dragged edge can't attach anywhere yet — tracked here,
+// mirroring PendingMediaSpawn above, and resolved once the node's
+// data.model.handles snapshot appears. Only meaningful for a "source" drag
+// (the user dragged FROM an existing output, dropping onto empty canvas to
+// spawn a new Generation Node as the *target*) — a "target" drag makes the
+// new node a *source*, and a Generation Node's output type is fixed, not
+// Model-dependent, so that case still auto-connects immediately.
+interface PendingGenerationSpawn {
+  nodeId: string;
+  originNodeId: string;
+  originHandleId: string | null;
+  /** The dragged handle's data type — matched against the newly-selected
+   * Model's handles via firstCompatibleHandle once it's picked. */
+  dataType: DataType;
+}
+
 export function CanvasEditor({ canvas }: { canvas: Canvas }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(graphNodes(canvas));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(graphEdges(canvas));
@@ -203,6 +222,10 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
   // Set only while a Handle-Spawned Static Media Reference is waiting on its
   // forced-open Asset Picker (ADR-0003) — see handleMediaSpawnAssetChosen.
   const pendingMediaSpawn = useRef<PendingMediaSpawn | null>(null);
+  // Set only while a Handle-Spawned Generation Node is waiting on its Model
+  // picker (ADR-0007/ADR-0008, issue #34) — see the effect below that
+  // resolves or drops it once data.model appears.
+  const pendingGenerationSpawn = useRef<PendingGenerationSpawn | null>(null);
 
   const addNode = useCallback(
     (type: NodeTypeKey, position: { x: number; y: number }) => {
@@ -276,6 +299,28 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
       return;
     }
 
+    // Generation Node deferral (ADR-0007/ADR-0008, issue #34): a Generation
+    // Node has no input handles until a Model is selected, so a "source"
+    // drag (the new node becomes the *target*) can't attach yet — the node
+    // is created and its Model picker's own resolution flow (the effect
+    // below) attaches or drops the edge once a Model is chosen. A "target"
+    // drag still auto-connects immediately below: the new node becomes the
+    // *source*, and a Generation Node's output type is fixed per node type,
+    // not Model-dependent.
+    if (
+      (candidate.nodeType === "imageGeneration" || candidate.nodeType === "videoGeneration") &&
+      direction === "source"
+    ) {
+      const newNode = addNode(candidate.nodeType, position);
+      pendingGenerationSpawn.current = {
+        nodeId: newNode.id,
+        originNodeId,
+        originHandleId,
+        dataType,
+      };
+      return;
+    }
+
     const newNode = addNode(candidate.nodeType, position);
     const connection: Connection =
       direction === "source"
@@ -331,6 +376,37 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
     const asset = (node?.data as StaticMediaReferenceNodeData | undefined)?.asset;
     if (asset) handleMediaSpawnAssetChosen(pending.nodeId);
   }, [nodes, handleMediaSpawnAssetChosen]);
+
+  // Generation Node handle-spawn deferral (ADR-0007/ADR-0008, issue #34):
+  // fires once the pending Handle-Spawned Generation Node's data.model is
+  // actually written through (ADR-0002: the node's own Model-select handler
+  // writes via updateNodeData, not a callback prop — so this observes the
+  // resulting `nodes` state the same way handleMediaSpawnAssetChosen does).
+  // The dragged edge attaches to the first compatible handle in schema
+  // order (firstCompatibleHandle, lib/edge-reconcile.ts); if the selected
+  // Model exposes no compatible handle, the pending edge is simply dropped
+  // — cancelling the picker (never selecting a Model) leaves the node on
+  // the canvas, unconnected, same as the Static Media Reference deferral.
+  useEffect(() => {
+    const pending = pendingGenerationSpawn.current;
+    if (!pending) return;
+    const node = nodes.find((n) => n.id === pending.nodeId);
+    const model = (node?.data as ImageGenerationNodeData | VideoGenerationNodeData | undefined)
+      ?.model;
+    if (!model) return; // no Model picked yet (or explicitly cleared) — keep waiting
+    pendingGenerationSpawn.current = null;
+
+    const handle = firstCompatibleHandle(model.handles, pending.dataType);
+    if (!handle) return; // selected Model has no compatible handle: drop the pending edge
+
+    const connection: Connection = {
+      source: pending.originNodeId,
+      sourceHandle: pending.originHandleId,
+      target: pending.nodeId,
+      targetHandle: handle.handleId,
+    };
+    setEdges((eds) => addEdge(connection, eds));
+  }, [nodes, setEdges]);
 
   // connection-rules only knows about node/handle types, not React Flow's
   // internal node ids, so this looks up each endpoint's type from current

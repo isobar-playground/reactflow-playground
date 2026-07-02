@@ -7,6 +7,7 @@ import {
   useNodeConnections,
   useNodesData,
   useReactFlow,
+  useUpdateNodeInternals,
   type NodeProps,
   type Node,
 } from "@xyflow/react";
@@ -131,6 +132,19 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
 
   const { getNode, getEdges, setEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
   const { duplicate, remove } = useNodeActions(id);
+
+  // React Flow only re-measures a node's Handle positions on resize/mount
+  // (useUpdateNodeInternals' own documented caveat — see
+  // static-media-reference-node.tsx's identical use for ADR-0003's Asset
+  // Picker deferral); selecting or changing the Model swaps the whole
+  // Input Handle set without a resize, so without this an edge created
+  // right after Model selection (e.g. a Handle-Spawned Node's deferred
+  // connect, issue #34, or issue #33's reconciled edges) has nowhere valid
+  // to render from and silently never appears.
+  const updateNodeInternals = useUpdateNodeInternals();
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [selectedModel?.endpointId, inputHandleLayout.length, id, updateNodeInternals]);
 
   // Variant cloning (CONTEXT.md / issue #12): when the counter is above one,
   // Generate adds (count - 1) sibling clones beside this node instead of

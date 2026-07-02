@@ -36,6 +36,17 @@ export interface SpawnCandidate {
 // asset is picked, not at spawn time).
 const MEDIA_REFERENCE_DATA_TYPES: DataType[] = ["image", "video"];
 
+// A Generation Node's Input Handles are unknown until a Model is selected
+// (ADR-0007/ADR-0008) — TARGET_HANDLES is now stale for these two node
+// types (issues #30/#31 moved connection validation to each node's own
+// snapshotted handles; see connection-rules.ts). So a Generation Node is a
+// candidate spawn target for *any* image/video/text drag, not one gated by
+// the old static handle map, with the actual target handle left null and
+// resolved later — once a Model is picked — via firstCompatibleHandle
+// (lib/edge-reconcile.ts), mirroring the existing Static Media Reference
+// deferral (ADR-0003, issue #34).
+const GENERATION_NODE_TYPES: NodeTypeKey[] = ["imageGeneration", "videoGeneration"];
+
 export function resolveSpawnCandidates(attempt: SpawnAttempt): SpawnCandidate[] {
   if (attempt.direction === "source") {
     return resolveTargetCandidates(attempt.dataType);
@@ -44,9 +55,12 @@ export function resolveSpawnCandidates(attempt: SpawnAttempt): SpawnCandidate[] 
 }
 
 // The user dragged from an output handle producing `dataType`: find every
-// node type (and first-declared matching handle) that could accept it as a
-// target. Static Media Reference itself never appears here — it's a
-// Reference (output handle only), so it accepts no inbound edges.
+// node type that could accept it as a target. Static Media Reference itself
+// never appears here — it's a Reference (output handle only), so it accepts
+// no inbound edges. Generation Nodes always appear (see
+// GENERATION_NODE_TYPES above, issue #34); every other node type is checked
+// against its own fixed TARGET_HANDLES entry, using its first-declared
+// matching handle.
 function resolveTargetCandidates(dataType: DataType): SpawnCandidate[] {
   const candidates: SpawnCandidate[] = [];
 
@@ -54,8 +68,13 @@ function resolveTargetCandidates(dataType: DataType): SpawnCandidate[] {
     NodeTypeKey,
     Record<string, DataType[]>,
   ][]) {
+    if (GENERATION_NODE_TYPES.includes(nodeType)) continue; // handled below
     const handleId = firstMatchingHandle(handles, dataType);
     if (handleId) candidates.push({ nodeType, handleId });
+  }
+
+  for (const nodeType of GENERATION_NODE_TYPES) {
+    candidates.push({ nodeType, handleId: null });
   }
 
   return candidates;

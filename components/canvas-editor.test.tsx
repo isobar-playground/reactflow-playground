@@ -3,12 +3,20 @@ import { render, screen, fireEvent, within, waitFor } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import * as libraryActions from "@/app/library-actions";
 import * as canvasActions from "@/app/canvas-actions";
+import * as modelsActions from "@/app/models-actions";
+import * as falSchema from "@/lib/fal-schema";
 import { CanvasEditor } from "./canvas-editor";
 import type { Canvas } from "@/lib/canvas-repo";
+import nanoBanana2EditSchema from "@/lib/__fixtures__/nano-banana-2-edit.json";
+import fluxSchnellSchema from "@/lib/__fixtures__/flux-schnell.json";
 
 vi.mock("@/app/canvas-actions", () => ({
   saveCanvasGraphAction: vi.fn().mockResolvedValue(undefined),
   renameCanvasAction: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/app/models-actions", () => ({
+  approvedModelsForKind: vi.fn().mockResolvedValue([]),
 }));
 
 function makeCanvas(graph: Record<string, unknown> = {}): Canvas {
@@ -335,9 +343,9 @@ describe("CanvasEditor drag-to-spawn (Handle-Spawned Node, issue #17)", () => {
           nodes: [
             {
               id: "ref1",
-              type: "staticTextReference",
+              type: "staticMediaReference",
               position: { x: 0, y: 0 },
-              data: { text: "hello" },
+              data: { asset: { url: "https://blob.example/cat.png", type: "image", name: "cat.png" } },
             },
           ],
           edges: [],
@@ -345,7 +353,7 @@ describe("CanvasEditor drag-to-spawn (Handle-Spawned Node, issue #17)", () => {
       />,
     );
 
-    await screen.findByPlaceholderText("Enter text…");
+    await screen.findByRole("img", { name: /cat.png/i });
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     const sourceHandle = container.querySelector(
@@ -355,15 +363,126 @@ describe("CanvasEditor drag-to-spawn (Handle-Spawned Node, issue #17)", () => {
 
     await user.click(await screen.findByText("Image Generation Node"));
 
-    // The new Image Generation Node exists and its Resolved Prompt shows the
-    // dragged Static Text Reference's text, proving the edge landed on the
-    // `text` handle without the user drawing it by hand. Scoped to the
-    // Resolved Prompt heading's container since "hello" also appears
-    // verbatim in the origin Static Text Reference's own textarea.
-    const resolvedPromptHeading = await screen.findByText("Resolved Prompt");
-    expect(
-      within(resolvedPromptHeading.parentElement as HTMLElement).getByText("hello"),
-    ).toBeInTheDocument();
+    // Video Generation Node isn't offered here (image never -> video), and
+    // there's no "Video Generation Node" text elsewhere to worry about.
+    // The image-typed candidate here is a Generation Node (issue #34): it
+    // auto-connects immediately since its own output handle typing isn't in
+    // question here — only its *input* handles are Model-dependent, and
+    // nothing in this scenario targets one.
+    expect(await screen.findByPlaceholderText(/prompt/i)).toBeInTheDocument();
+  });
+
+  // Generation Node handle-spawn deferral (issue #34 / ADR-0007): a
+  // Generation Node has no input handles until a Model is selected, so
+  // picking it from the spawn picker must create the node without
+  // connecting immediately — mirroring the existing Static Media Reference
+  // deferral (ADR-0003) — and only attach the dragged edge once a Model is
+  // chosen, to the first compatible handle in schema order.
+  it("defers the edge when the handle-spawn candidate is a Generation Node with no Model yet, then attaches it once a Model with a compatible handle is picked", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([
+      {
+        endpointId: "fal-ai/nano-banana-2/edit",
+        name: "Nano Banana 2 Edit",
+        category: "image-to-image",
+        description: "",
+        tags: [],
+      },
+    ]);
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue(
+      nanoBanana2EditSchema as unknown as Record<string, unknown>,
+    );
+
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "ref1",
+              type: "staticMediaReference",
+              position: { x: 0, y: 0 },
+              data: { asset: { url: "https://blob.example/cat.png", type: "image", name: "cat.png" } },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    await screen.findByRole("img", { name: /cat.png/i });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const sourceHandle = container.querySelector(
+      '.react-flow__node[data-id="ref1"] .react-flow__handle.source',
+    ) as HTMLElement;
+    await dragFromHandleToEmptyCanvas(sourceHandle);
+
+    await user.click(await screen.findByText("Image Generation Node"));
+
+    // The Generation Node is created but no edge exists yet — no Model, no
+    // handles to attach to.
+    await screen.findByPlaceholderText(/prompt/i);
+    expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(0);
+
+    // Picking a Model whose schema exposes an image-compatible handle
+    // (image_urls) resolves the deferred edge onto it.
+    const modelSelect = await screen.findByLabelText("Model");
+    await user.selectOptions(modelSelect, "fal-ai/nano-banana-2/edit");
+
+    await waitFor(() => {
+      expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(1);
+    });
+  });
+
+  it("drops the pending edge when the picked Model has no compatible handle", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([
+      {
+        endpointId: "fal-ai/flux/schnell",
+        name: "FLUX.1 [schnell]",
+        category: "text-to-image",
+        description: "",
+        tags: [],
+      },
+    ]);
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue(
+      fluxSchnellSchema as unknown as Record<string, unknown>,
+    );
+
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "ref1",
+              type: "staticMediaReference",
+              position: { x: 0, y: 0 },
+              data: { asset: { url: "https://blob.example/cat.png", type: "image", name: "cat.png" } },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    await screen.findByRole("img", { name: /cat.png/i });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const sourceHandle = container.querySelector(
+      '.react-flow__node[data-id="ref1"] .react-flow__handle.source',
+    ) as HTMLElement;
+    await dragFromHandleToEmptyCanvas(sourceHandle);
+
+    await user.click(await screen.findByText("Image Generation Node"));
+    await screen.findByPlaceholderText(/prompt/i);
+
+    // flux/schnell is text-to-image only — no image-accepting handle in its
+    // schema — so the pending edge must be dropped, not attached anywhere.
+    const modelSelect = await screen.findByLabelText("Model");
+    await user.selectOptions(modelSelect, "fal-ai/flux/schnell");
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(0);
   });
 
   // Static Media Reference special case (issue #17 / ADR-0003): its output

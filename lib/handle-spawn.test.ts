@@ -8,15 +8,15 @@ import { resolveSpawnCandidates, type SpawnAttempt } from "./handle-spawn";
 // table-driven style.
 
 describe("resolveSpawnCandidates", () => {
-  it("yields both Generation Node types with their text handle when dragging a text-typed source handle", () => {
+  it("yields both Generation Node types (handle deferred) when dragging a text-typed source handle", () => {
     const attempt: SpawnAttempt = {
       direction: "source",
       dataType: "text",
     };
 
     expect(resolveSpawnCandidates(attempt)).toEqual([
-      { nodeType: "imageGeneration", handleId: "text" },
-      { nodeType: "videoGeneration", handleId: "text" },
+      { nodeType: "imageGeneration", handleId: null },
+      { nodeType: "videoGeneration", handleId: null },
     ]);
   });
 
@@ -32,19 +32,31 @@ describe("resolveSpawnCandidates", () => {
     ]);
   });
 
-  it("yields videoGeneration with startFrame specifically when dragging an output that produces image (first declared match)", () => {
+  // issue #34 / ADR-0007: a Generation Node's Input Handles are unknown
+  // until a Model is selected, so it can't be excluded or handle-pinned at
+  // spawn time by a static per-node-type map the way it used to be —
+  // handle-spawn candidacy is now output-kind agnostic (any image/video/text
+  // drag offers both Generation Node types), and the actual target handle is
+  // resolved later, once a Model is picked (firstCompatibleHandle,
+  // lib/edge-reconcile.ts), via the deferred-edge flow the picker triggers.
+  it("offers both Generation Node types for a video-typed source drag, with the handle deferred to Model selection", () => {
     const attempt: SpawnAttempt = {
       direction: "source",
-      dataType: "image",
+      dataType: "video",
     };
 
     const candidates = resolveSpawnCandidates(attempt);
-    const videoGenCandidate = candidates.find((c) => c.nodeType === "videoGeneration");
 
-    expect(videoGenCandidate).toEqual({ nodeType: "videoGeneration", handleId: "startFrame" });
+    expect(candidates).toContainEqual({ nodeType: "imageGeneration", handleId: null });
+    expect(candidates).toContainEqual({ nodeType: "videoGeneration", handleId: null });
   });
 
-  it("a video-typed handle never yields imageGeneration (no video->image)", () => {
+  // Unlike the source-side (target-candidate) case above, a "target" drag
+  // asks which node types could *supply* dataType as their output — that's
+  // still a fixed, known property per node type (an Image Generation Node's
+  // output is always image), so it's unaffected by issue #34: only
+  // videoGeneration can source a video-typed target handle.
+  it("a video-typed target drag still only offers videoGeneration as a source (output modality is fixed, not schema-derived)", () => {
     const attempt: SpawnAttempt = {
       direction: "target",
       dataType: "video",
@@ -53,19 +65,6 @@ describe("resolveSpawnCandidates", () => {
     const candidates = resolveSpawnCandidates(attempt);
 
     expect(candidates.some((c) => c.nodeType === "imageGeneration")).toBe(false);
-  });
-
-  it("dragging Video Generation Node's startFrame/endFrame/imageReference (all image-accepting) each yield the same source-side candidates", () => {
-    const attempt: SpawnAttempt = {
-      direction: "target",
-      dataType: "image",
-    };
-
-    const candidates = resolveSpawnCandidates(attempt);
-
-    expect(candidates).toEqual([
-      { nodeType: "staticMediaReference", handleId: null },
-      { nodeType: "imageGeneration", handleId: null },
-    ]);
+    expect(candidates.some((c) => c.nodeType === "videoGeneration")).toBe(true);
   });
 });
