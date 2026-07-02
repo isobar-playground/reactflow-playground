@@ -111,12 +111,30 @@ export async function fetchModelInputSchema(
   return response.json();
 }
 
-export function deriveInputHandles(openapiDocument: unknown, endpointId: string): ResolvedHandle[] {
+export interface DeriveInputHandlesResult {
+  handles: ResolvedHandle[];
+  /**
+   * Whether the Model's schema exposes a `negative_prompt` field (ADR-0007 /
+   * issue #32). It is never itself a handle — it's surfaced as an optional
+   * config field beneath the prompt, not a connection point, and never part
+   * of the Resolved Prompt.
+   */
+  hasNegativePrompt: boolean;
+}
+
+export function deriveInputHandles(
+  openapiDocument: unknown,
+  endpointId: string,
+): DeriveInputHandlesResult {
   const document = openapiDocument as OpenApiDocument;
   const inputSchema = resolveInputSchema(document, endpointId);
-  if (!inputSchema?.properties) return [];
+  if (!inputSchema?.properties) return { handles: [], hasNegativePrompt: false };
 
   const handles: ResolvedHandle[] = [];
+  const hasNegativePrompt = Object.prototype.hasOwnProperty.call(
+    inputSchema.properties,
+    "negative_prompt",
+  );
 
   for (const [fieldName, property] of Object.entries(inputSchema.properties)) {
     // Nested objects are skipped outright (ADR-0007) — a handle only ever
@@ -141,5 +159,5 @@ export function deriveInputHandles(openapiDocument: unknown, endpointId: string)
     });
   }
 
-  return handles;
+  return { handles, hasNegativePrompt };
 }

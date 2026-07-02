@@ -600,6 +600,7 @@ describe("VideoGenerationNode Model picker (issue #31)", () => {
         name: "Kling Video v3 Pro",
         category: "image-to-video",
         handles: [],
+        hasNegativePrompt: false,
       });
     });
   });
@@ -630,6 +631,7 @@ describe("VideoGenerationNode Model picker (issue #31)", () => {
         name: "Kling Video v3 Pro",
         category: "image-to-video",
         handles: [],
+        hasNegativePrompt: false,
       },
     });
 
@@ -785,6 +787,7 @@ describe("VideoGenerationNode schema-derived Input Handles (issue #31)", () => {
           { handleId: "start_image_url", label: "start_image_url", dataType: "image", many: false },
           { handleId: "end_image_url", label: "end_image_url", dataType: "image", many: false },
         ],
+        hasNegativePrompt: false,
       },
     });
 
@@ -809,6 +812,7 @@ describe("VideoGenerationNode schema-derived Input Handles (issue #31)", () => {
         handles: [
           { handleId: "start_image_url", label: "start_image_url", dataType: "image", many: false },
         ],
+        hasNegativePrompt: false,
       },
     });
 
@@ -816,5 +820,204 @@ describe("VideoGenerationNode schema-derived Input Handles (issue #31)", () => {
       document.querySelector('.react-flow__handle[data-handleid="start_image_url"]'),
     ).not.toBeNull();
     expect(fetchSchema).not.toHaveBeenCalled();
+  });
+});
+
+describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
+  const kling: Model = {
+    endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+    name: "Kling Video v3 Pro",
+    category: "image-to-video",
+    description: "",
+    tags: [],
+  };
+  const veo: Model = {
+    endpointId: "fal-ai/veo",
+    name: "Veo",
+    category: "text-to-video",
+    description: "",
+    tags: [],
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows no negative-prompt field before a Model is selected", () => {
+    renderNode();
+
+    expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the negative-prompt field once a selected Model's schema has hasNegativePrompt: true", () => {
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+        name: "Kling Video v3 Pro",
+        category: "image-to-video",
+        handles: [],
+        hasNegativePrompt: true,
+      },
+    });
+
+    expect(screen.getByLabelText(/negative prompt/i)).toBeInTheDocument();
+  });
+
+  it("hides the negative-prompt field for a selected Model whose schema has no negative_prompt", () => {
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/veo",
+        name: "Veo",
+        category: "text-to-video",
+        handles: [],
+        hasNegativePrompt: false,
+      },
+    });
+
+    expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
+  });
+
+  it("fetches the selected Model's schema and derives hasNegativePrompt, snapshotting it into node data", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling]);
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({
+      paths: {
+        "/fal-ai/kling-video/v3/pro/image-to-video": {
+          post: {
+            requestBody: {
+              content: { "application/json": { schema: { $ref: "#/components/schemas/In" } } },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          In: {
+            properties: {
+              prompt: { type: "string" },
+              negative_prompt: { type: "string" },
+              start_image_url: { type: "string" },
+            },
+          },
+        },
+      },
+    });
+    const user = userEvent.setup();
+    renderNode();
+
+    await screen.findByRole("option", { name: "Kling Video v3 Pro" });
+    const picker = screen.getByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/kling-video/v3/pro/image-to-video");
+
+    expect(await screen.findByLabelText(/negative prompt/i)).toBeInTheDocument();
+  });
+
+  it("does not show the field for a Model whose schema lacks negative_prompt", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([veo]);
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({ paths: {}, components: {} });
+    const user = userEvent.setup();
+    renderNode();
+
+    await screen.findByRole("option", { name: "Veo" });
+    const picker = screen.getByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/veo");
+
+    await waitFor(() => {
+      expect(screen.queryByText(/select a model to configure/i)).not.toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
+  });
+
+  it("stores the negative-prompt value in node data via updateNodeData", async () => {
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: {
+            prompt: "",
+            history: { entries: [], activeId: null },
+            model: {
+              endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+              name: "Kling Video v3 Pro",
+              category: "image-to-video",
+              handles: [],
+              hasNegativePrompt: true,
+            },
+          },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    const field = screen.getByLabelText(/negative prompt/i);
+    await user.type(field, "blurry, low quality");
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.negativePrompt).toBe("blurry, low quality");
+    });
+  });
+
+  it("persists the negative-prompt value on reload", () => {
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+        name: "Kling Video v3 Pro",
+        category: "image-to-video",
+        handles: [],
+        hasNegativePrompt: true,
+      },
+      negativePrompt: "blurry, low quality",
+    });
+
+    expect(screen.getByLabelText(/negative prompt/i)).toHaveValue("blurry, low quality");
+  });
+
+  it("does not include the negative prompt in the Resolved Prompt preview", () => {
+    renderNode({
+      prompt: "a dog running",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+        name: "Kling Video v3 Pro",
+        category: "image-to-video",
+        handles: [],
+        hasNegativePrompt: true,
+      },
+      negativePrompt: "blurry, low quality",
+    });
+
+    const resolvedPromptHeading = screen.getByText("Resolved Prompt");
+    const resolvedPromptBlock = resolvedPromptHeading.parentElement as HTMLElement;
+    expect(within(resolvedPromptBlock).getByText("a dog running")).toBeInTheDocument();
+    expect(within(resolvedPromptBlock).queryByText(/blurry/i)).not.toBeInTheDocument();
   });
 });

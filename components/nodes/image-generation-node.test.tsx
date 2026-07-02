@@ -836,6 +836,7 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
         name: "FLUX.1 [dev]",
         category: "text-to-image",
         handles: [],
+        hasNegativePrompt: false,
       });
     });
   });
@@ -861,7 +862,13 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
     renderNode({
       prompt: "",
       history: { entries: [], activeId: null },
-      model: { endpointId: "fal-ai/flux/dev", name: "FLUX.1 [dev]", category: "text-to-image", handles: [] },
+      model: {
+        endpointId: "fal-ai/flux/dev",
+        name: "FLUX.1 [dev]",
+        category: "text-to-image",
+        handles: [],
+        hasNegativePrompt: false,
+      },
     });
 
     expect(screen.getByText("Text → Image")).toBeInTheDocument();
@@ -992,6 +999,7 @@ describe("ImageGenerationNode schema-derived Input Handles (issue #30)", () => {
           { handleId: "image_urls", label: "image_urls", dataType: "image", many: true },
           { handleId: "video_url", label: "video_url", dataType: "video", many: false },
         ],
+        hasNegativePrompt: false,
       },
     });
 
@@ -1014,10 +1022,209 @@ describe("ImageGenerationNode schema-derived Input Handles (issue #30)", () => {
         name: "Nano Banana 2 Edit",
         category: "image-to-image",
         handles: [{ handleId: "image_urls", label: "image_urls", dataType: "image", many: true }],
+        hasNegativePrompt: false,
       },
     });
 
     expect(document.querySelector('.react-flow__handle[data-handleid="image_urls"]')).not.toBeNull();
     expect(fetchSchema).not.toHaveBeenCalled();
+  });
+});
+
+describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
+  const negativePromptModel: Model = {
+    endpointId: "fal-ai/has-negative-prompt",
+    name: "Has Negative Prompt",
+    category: "text-to-image",
+    description: "",
+    tags: [],
+  };
+  const noNegativePromptModel: Model = {
+    endpointId: "fal-ai/flux/dev",
+    name: "FLUX.1 [dev]",
+    category: "text-to-image",
+    description: "",
+    tags: [],
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows no negative-prompt field before a Model is selected", () => {
+    renderNode();
+
+    expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the negative-prompt field once a selected Model's schema has hasNegativePrompt: true", () => {
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/has-negative-prompt",
+        name: "Has Negative Prompt",
+        category: "text-to-image",
+        handles: [],
+        hasNegativePrompt: true,
+      },
+    });
+
+    expect(screen.getByLabelText(/negative prompt/i)).toBeInTheDocument();
+  });
+
+  it("hides the negative-prompt field for a selected Model whose schema has no negative_prompt", () => {
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/flux/dev",
+        name: "FLUX.1 [dev]",
+        category: "text-to-image",
+        handles: [],
+        hasNegativePrompt: false,
+      },
+    });
+
+    expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
+  });
+
+  it("fetches the selected Model's schema and derives hasNegativePrompt, snapshotting it into node data", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([negativePromptModel]);
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({
+      paths: {
+        "/fal-ai/has-negative-prompt": {
+          post: {
+            requestBody: {
+              content: { "application/json": { schema: { $ref: "#/components/schemas/In" } } },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          In: {
+            properties: {
+              prompt: { type: "string" },
+              negative_prompt: { type: "string" },
+            },
+          },
+        },
+      },
+    });
+    const user = userEvent.setup();
+    renderNode();
+
+    await screen.findByRole("option", { name: "Has Negative Prompt" });
+    const picker = screen.getByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/has-negative-prompt");
+
+    expect(await screen.findByLabelText(/negative prompt/i)).toBeInTheDocument();
+  });
+
+  it("does not show the field for a Model whose schema lacks negative_prompt", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([noNegativePromptModel]);
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({ paths: {}, components: {} });
+    const user = userEvent.setup();
+    renderNode();
+
+    await screen.findByRole("option", { name: "FLUX.1 [dev]" });
+    const picker = screen.getByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/flux/dev");
+
+    await waitFor(() => {
+      expect(screen.queryByText(/select a model to configure/i)).not.toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
+  });
+
+  it("stores the negative-prompt value in node data via updateNodeData", async () => {
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: {
+            prompt: "",
+            history: { entries: [], activeId: null },
+            model: {
+              endpointId: "fal-ai/has-negative-prompt",
+              name: "Has Negative Prompt",
+              category: "text-to-image",
+              handles: [],
+              hasNegativePrompt: true,
+            },
+          },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    const field = screen.getByLabelText(/negative prompt/i);
+    await user.type(field, "blurry, low quality");
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
+      expect(data.negativePrompt).toBe("blurry, low quality");
+    });
+  });
+
+  it("persists the negative-prompt value on reload", () => {
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/has-negative-prompt",
+        name: "Has Negative Prompt",
+        category: "text-to-image",
+        handles: [],
+        hasNegativePrompt: true,
+      },
+      negativePrompt: "blurry, low quality",
+    });
+
+    expect(screen.getByLabelText(/negative prompt/i)).toHaveValue("blurry, low quality");
+  });
+
+  it("does not include the negative prompt in the Resolved Prompt preview", () => {
+    renderNode({
+      prompt: "a cat",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/has-negative-prompt",
+        name: "Has Negative Prompt",
+        category: "text-to-image",
+        handles: [],
+        hasNegativePrompt: true,
+      },
+      negativePrompt: "blurry, low quality",
+    });
+
+    const resolvedPromptHeading = screen.getByText("Resolved Prompt");
+    const resolvedPromptBlock = resolvedPromptHeading.parentElement as HTMLElement;
+    expect(within(resolvedPromptBlock).getByText("a cat")).toBeInTheDocument();
+    expect(within(resolvedPromptBlock).queryByText(/blurry/i)).not.toBeInTheDocument();
   });
 });

@@ -1,0 +1,93 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "Queue OpenAPI for fal-ai/kling-video/v3/pro/image-to-video",
+    "version": "1.0.0",
+    "description": "The OpenAPI schema for the fal-ai/kling-video/v3/pro/image-to-video queue.",
+    "x-fal-metadata": {
+      "endpointId": "fal-ai/kling-video/v3/pro/image-to-video",
+      "category": "image-to-video",
+      "thumbnailUrl": "",
+      "playgroundUrl": "https://fal.ai/models/fal-ai/kling-video/v3/pro/image-to-video",
+      "documentationUrl": "https://fal.ai/models/fal-ai/kling-video/v3/pro/image-to-video/api",
+      "about": "Kling 3.0 Pro Image to Video generates a video from a start and optional end image."
+    }
+  },
+  "components": {
+    "schemas": {
+      "KlingV3ProImageToVideoInput": {
+        "properties": {
+          "prompt": {
+            "description": "The prompt for video generation.",
+            "title": "Prompt",
+            "type": "string",
+            "examples": ["A dog running through a field"]
+          },
+          "negative_prompt": {
+            "description": "Negative prompt to steer generation away from unwanted content.",
+            "title": "Negative Prompt",
+            "type": "string",
+            "default": "blur, distort, and low quality"
+          },
+          "start_image_url": {
+            "description": "URL of the starting frame image.",
+            "title": "Start Image URL",
+            "type": "string",
+            "examples": ["https://storage.googleapis.com/falserverless/example_inputs/kling-start.png"]
+          },
+          "end_image_url": {
+            "description": "URL of the optional ending frame image.",
+            "title": "End Image URL",
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "examples": ["https://storage.googleapis.com/falserverless/example_inputs/kling-end.png"]
+          },
+          "duration": {
+            "description": "The duration of the generated video in seconds.",
+            "title": "Duration",
+            "type": "string",
+            "default": "5",
+            "enum": ["5", "10"]
+          },
+          "cfg_scale": {
+            "description": "The CFG (Classifier Free Guidance) scale for generation.",
+            "title": "CFG Scale",
+            "type": "number",
+            "default": 0.5
+          },
+          "seed": {
+            "description": "The seed for the random number generator.",
+            "title": "Seed",
+            "anyOf": [{ "type": "integer" }, { "type": "null" }]
+          }
+        },
+        "type": "object",
+        "title": "KlingV3ProImageToVideoInput",
+        "required": ["prompt", "start_image_url"],
+        "x-fal-order-properties": [
+          "prompt",
+          "negative_prompt",
+          "start_image_url",
+          "end_image_url",
+          "duration",
+          "cfg_scale",
+          "seed"
+        ]
+      }
+    }
+  },
+  "paths": {
+    "/fal-ai/kling-video/v3/pro/image-to-video": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KlingV3ProImageToVideoInput"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

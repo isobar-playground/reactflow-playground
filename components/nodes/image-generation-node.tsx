@@ -38,12 +38,14 @@ export type SelectedModel = {
   name: string;
   category: Model["category"];
   handles: ResolvedHandle[];
+  hasNegativePrompt: boolean;
 };
 
 export type ImageGenerationNodeData = {
   prompt: string;
   history: NodeHistory;
   model?: SelectedModel | null;
+  negativePrompt?: string;
 };
 
 export type ImageGenerationNodeType = Node<ImageGenerationNodeData, "imageGeneration">;
@@ -257,6 +259,22 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         data-node-id={id}
       />
 
+      {/* Negative-prompt config field (CONTEXT.md's Generation Node / ADR-0007,
+          issue #32): shown only when the selected Model's schema has a
+          `negative_prompt` field (data.model.hasNegativePrompt). It is a plain
+          config field written through to data.negativePrompt — not an Input
+          Handle, and never mixed into the Resolved Prompt below. */}
+      {selectedModel?.hasNegativePrompt && (
+        <textarea
+          aria-label="Negative prompt"
+          className="nodrag mb-3 w-full resize-none rounded-md border border-border bg-background p-2 text-sm outline-none"
+          rows={2}
+          value={data.negativePrompt ?? ""}
+          onChange={(event) => updateNodeData(id, { negativePrompt: event.target.value })}
+          placeholder="Negative prompt (optional)…"
+        />
+      )}
+
       {/* Resolved Prompt preview (CONTEXT.md): connected Static Text
           References (edge order) concatenated with the local prompt. */}
       {resolvedPromptText.length > 0 && (
@@ -300,13 +318,14 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
                 return;
               }
               void fetchModelInputSchema(chosen.endpointId).then((schema) => {
-                const handles = deriveInputHandles(schema, chosen.endpointId);
+                const { handles, hasNegativePrompt } = deriveInputHandles(schema, chosen.endpointId);
                 updateNodeData(id, {
                   model: {
                     endpointId: chosen.endpointId,
                     name: chosen.name,
                     category: chosen.category,
                     handles,
+                    hasNegativePrompt,
                   },
                 });
               });
