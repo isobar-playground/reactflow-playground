@@ -37,6 +37,23 @@ export interface ConnectionAttempt {
    * types that already have a fixed entry in SOURCE_DATA_TYPE.
    */
   sourceDataType?: DataType | null;
+  /**
+   * The target node instance's own snapshotted Input Handles (ADR-0007/
+   * ADR-0008, issue #30): a Generation Node's handles come from its selected
+   * Model's FAL input schema, not a fixed per-node-type list. When provided,
+   * this REPLACES TARGET_HANDLES[attempt.targetType] entirely for this
+   * attempt — including an empty object, which correctly rejects every
+   * handle for a node with no Model selected yet. Omitted (undefined) falls
+   * back to the static map, for node types not yet migrated to per-instance
+   * handles (videoGeneration, until issue #31).
+   */
+  targetHandles?: Record<string, TargetHandleSpec>;
+}
+
+export interface TargetHandleSpec {
+  dataTypes: DataType[];
+  /** Accepts many incoming edges (true) or exactly one (false). */
+  many: boolean;
 }
 
 export interface ConnectionAttemptEdge {
@@ -100,16 +117,34 @@ export function isConnectionAllowed(attempt: ConnectionAttempt): boolean {
   const sourceDataType = SOURCE_DATA_TYPE[attempt.sourceType] ?? attempt.sourceDataType;
   if (!sourceDataType) return false;
 
+  if (attempt.targetHandle === null) return false;
+
+  const edgesOnTarget = attempt.existingEdges.filter((edge) => edge.target === attempt.targetId);
+
+  // Per-instance snapshotted handles (ADR-0007/ADR-0008, issue #30) take
+  // over entirely when provided — a Generation Node's Input Handles come
+  // from its selected Model, not a fixed per-node-type list. An empty object
+  // (no Model selected yet) correctly rejects every handle.
+  if (attempt.targetHandles) {
+    const spec = attempt.targetHandles[attempt.targetHandle];
+    if (!spec) return false;
+    if (!spec.dataTypes.includes(sourceDataType)) return false;
+    if (!spec.many) {
+      const alreadyConnected = edgesOnTarget.some(
+        (edge) => edge.targetHandle === attempt.targetHandle,
+      );
+      if (alreadyConnected) return false;
+    }
+    return true;
+  }
+
   const handles = TARGET_HANDLES[attempt.targetType];
   if (!handles) return false; // e.g. a Reference target: no inbound edges allowed
 
-  if (attempt.targetHandle === null) return false;
   const acceptedTypes = handles[attempt.targetHandle];
   if (!acceptedTypes) return false; // unknown/unsupported handle
 
   if (!acceptedTypes.includes(sourceDataType)) return false;
-
-  const edgesOnTarget = attempt.existingEdges.filter((edge) => edge.target === attempt.targetId);
 
   const singleHandles = SINGLE_CONNECTION_HANDLES[attempt.targetType];
   if (singleHandles?.includes(attempt.targetHandle)) {

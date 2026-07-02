@@ -386,7 +386,20 @@ describe("CanvasEditor drag-to-spawn (Handle-Spawned Node, issue #17)", () => {
               id: "gen1",
               type: "imageGeneration",
               position: { x: 0, y: 0 },
-              data: { prompt: "", history: { entries: [], activeId: null } },
+              data: {
+                prompt: "",
+                history: { entries: [], activeId: null },
+                // Issue #30: an Image Generation Node has no input handles
+                // until a Model is selected — pre-seed a snapshotted Model
+                // (as ADR-0008 would after selection) so this drag-to-spawn
+                // scenario still has an `image` handle to drag from.
+                model: {
+                  endpointId: "fal-ai/edit/model",
+                  name: "Edit Model",
+                  category: "image-to-image",
+                  handles: [{ handleId: "image", label: "image", dataType: "image", many: true }],
+                },
+              },
             },
           ],
           edges: [],
@@ -506,7 +519,14 @@ describe("CanvasEditor edge deletion between any node types", () => {
               id: "gen1",
               type: "imageGeneration",
               position: { x: 400, y: 0 },
-              data: { prompt: "in a driveway", history: { entries: [], activeId: null } },
+              data: {
+                prompt: "in a driveway",
+                history: { entries: [], activeId: null },
+                // Issue #30: the `text` handle only renders once a Model is
+                // selected — snapshot one so this edge has a handle to
+                // attach to.
+                model: { endpointId: "fal-ai/edit/model", name: "Edit Model", category: "image-to-image", handles: [] },
+              },
             },
           ],
           edges: [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }],
@@ -548,7 +568,19 @@ describe("CanvasEditor edge deletion between any node types", () => {
               id: "gen2",
               type: "imageGeneration",
               position: { x: 400, y: 0 },
-              data: { prompt: "edited", history: { entries: [], activeId: null } },
+              data: {
+                prompt: "edited",
+                history: { entries: [], activeId: null },
+                // Issue #30: gen2's `image` handle only renders once a Model
+                // is selected — snapshot one so this edge has a handle to
+                // attach to.
+                model: {
+                  endpointId: "fal-ai/edit/model",
+                  name: "Edit Model",
+                  category: "image-to-image",
+                  handles: [{ handleId: "image", label: "image", dataType: "image", many: true }],
+                },
+              },
             },
           ],
           edges: [{ id: "e1", source: "gen1", target: "gen2", targetHandle: "image" }],
@@ -580,7 +612,14 @@ describe("CanvasEditor edge deletion between any node types", () => {
               id: "gen1",
               type: "imageGeneration",
               position: { x: 400, y: 0 },
-              data: { prompt: "in a driveway", history: { entries: [], activeId: null } },
+              data: {
+                prompt: "in a driveway",
+                history: { entries: [], activeId: null },
+                // Issue #30: the `text` handle only renders once a Model is
+                // selected — snapshot one so this edge has a handle to
+                // attach to.
+                model: { endpointId: "fal-ai/edit/model", name: "Edit Model", category: "image-to-image", handles: [] },
+              },
             },
           ],
           edges: [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }],

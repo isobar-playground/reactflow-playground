@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
@@ -12,10 +12,12 @@ import {
 } from "@xyflow/react";
 import * as generationMock from "@/lib/generation-mock";
 import * as modelsActions from "@/app/models-actions";
+import * as falSchema from "@/lib/fal-schema";
 import { ImageGenerationNode, type ImageGenerationNodeData } from "./image-generation-node";
 import { StaticTextReferenceNode } from "./static-text-reference-node";
 import { StaticMediaReferenceNode } from "./static-media-reference-node";
 import type { Model } from "@/lib/fal-models";
+import nanoBanana2EditSchema from "@/lib/__fixtures__/nano-banana-2-edit.json";
 
 vi.mock("@/app/models-actions", () => ({
   approvedModelsForKind: vi.fn().mockResolvedValue([]),
@@ -420,15 +422,6 @@ describe("ImageGenerationNode text handle and Resolved Prompt", () => {
     );
   }
 
-  it("renders target text and image handles in addition to the source output handle", () => {
-    const { container } = renderNode();
-
-    const handles = container.querySelectorAll(".react-flow__handle");
-    expect(handles).toHaveLength(3);
-    expect(container.querySelector('.react-flow__handle[data-handleid="text"]')).not.toBeNull();
-    expect(container.querySelector('.react-flow__handle[data-handleid="image"]')).not.toBeNull();
-  });
-
   it("shows the Resolved Prompt preview combining a connected Static Text Reference with the local prompt", () => {
     const nodes: Node[] = [
       {
@@ -758,6 +751,14 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
     tags: [],
   };
 
+  // Issue #30 / ADR-0008: selecting a Model now also fetches its schema to
+  // derive and snapshot handles. These #29-era tests only care about the
+  // model/label bookkeeping, so stub a schema with no media inputs to keep
+  // them focused (and network-free).
+  beforeEach(() => {
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({ paths: {}, components: {} });
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -834,6 +835,7 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
         endpointId: "fal-ai/flux/dev",
         name: "FLUX.1 [dev]",
         category: "text-to-image",
+        handles: [],
       });
     });
   });
@@ -859,7 +861,7 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
     renderNode({
       prompt: "",
       history: { entries: [], activeId: null },
-      model: { endpointId: "fal-ai/flux/dev", name: "FLUX.1 [dev]", category: "text-to-image" },
+      model: { endpointId: "fal-ai/flux/dev", name: "FLUX.1 [dev]", category: "text-to-image", handles: [] },
     });
 
     expect(screen.getByText("Text → Image")).toBeInTheDocument();
@@ -883,7 +885,7 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
         data: {
           prompt: "",
           history: { entries: [], activeId: null },
-          model: { endpointId: "fal-ai/flux/dev", name: "FLUX.1 [dev]", category: "text-to-image" },
+          model: { endpointId: "fal-ai/flux/dev", name: "FLUX.1 [dev]", category: "text-to-image", handles: [] },
         },
       },
     ]);
@@ -898,5 +900,124 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
     });
     const labels = screen.getAllByText("Text → Image");
     expect(labels).toHaveLength(2);
+  });
+});
+
+describe("ImageGenerationNode schema-derived Input Handles (issue #30)", () => {
+  const flux: Model = {
+    endpointId: "fal-ai/flux/dev",
+    name: "FLUX.1 [dev]",
+    category: "text-to-image",
+    description: "",
+    tags: [],
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("renders no input handles before a Model is selected", () => {
+    const { container } = renderNode();
+
+    const targetHandles = container.querySelectorAll(".react-flow__handle.target");
+    expect(targetHandles).toHaveLength(0);
+    // Still exactly one output (source) handle.
+    expect(container.querySelectorAll(".react-flow__handle.source")).toHaveLength(1);
+  });
+
+  it("fetches the selected Model's schema and snapshots the resolved handles into node data", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([flux]);
+    const fetchSchema = vi
+      .spyOn(falSchema, "fetchModelInputSchema")
+      .mockResolvedValue(nanoBanana2EditSchema);
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "", history: { entries: [], activeId: null } },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    await screen.findByRole("option", { name: "FLUX.1 [dev]" });
+    const picker = screen.getByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/flux/dev");
+
+    expect(fetchSchema).toHaveBeenCalledWith("fal-ai/flux/dev");
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
+      expect(data.model?.handles).toEqual(
+        expect.arrayContaining([
+          { handleId: "image_urls", label: "image_urls", dataType: "image", many: true },
+          { handleId: "video_url", label: "video_url", dataType: "video", many: false },
+        ]),
+      );
+    });
+  });
+
+  it("renders a handle for each snapshotted entry, including a video handle from an image Model's schema", async () => {
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/nano-banana-2/edit",
+        name: "Nano Banana 2 Edit",
+        category: "image-to-image",
+        handles: [
+          { handleId: "image_urls", label: "image_urls", dataType: "image", many: true },
+          { handleId: "video_url", label: "video_url", dataType: "video", many: false },
+        ],
+      },
+    });
+
+    expect(
+      document.querySelector('.react-flow__handle[data-handleid="image_urls"]'),
+    ).not.toBeNull();
+    expect(
+      document.querySelector('.react-flow__handle[data-handleid="video_url"]'),
+    ).not.toBeNull();
+    expect(document.querySelector('.react-flow__handle[data-handleid="text"]')).not.toBeNull();
+  });
+
+  it("renders handles from the snapshot on reload without re-contacting FAL", () => {
+    const fetchSchema = vi.spyOn(falSchema, "fetchModelInputSchema");
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/nano-banana-2/edit",
+        name: "Nano Banana 2 Edit",
+        category: "image-to-image",
+        handles: [{ handleId: "image_urls", label: "image_urls", dataType: "image", many: true }],
+      },
+    });
+
+    expect(document.querySelector('.react-flow__handle[data-handleid="image_urls"]')).not.toBeNull();
+    expect(fetchSchema).not.toHaveBeenCalled();
   });
 });

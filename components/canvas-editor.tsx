@@ -38,9 +38,11 @@ import {
   SOURCE_DATA_TYPE,
   TARGET_HANDLES,
   type DataType,
+  type TargetHandleSpec,
 } from "@/lib/connection-rules";
 import { resolveSpawnCandidates, type SpawnCandidate } from "@/lib/handle-spawn";
 import type { Canvas } from "@/lib/canvas-repo";
+import type { ImageGenerationNodeData } from "@/components/nodes/image-generation-node";
 
 const AUTOSAVE_DELAY_MS = 1500;
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
@@ -90,6 +92,27 @@ function draggedHandleDataType(
   const handles = TARGET_HANDLES[fromNode.type as NodeTypeKey];
   const accepted = handles?.[fromHandleId ?? ""];
   return accepted?.[0];
+}
+
+// Per-instance target handles (ADR-0007/ADR-0008, issue #30): an Image
+// Generation Node's Input Handles come from its selected Model's snapshotted
+// schema, not the static TARGET_HANDLES map — this reads that snapshot off
+// the node's own data. Returns undefined for node types not yet migrated
+// (videoGeneration, until issue #31), so isConnectionAllowed falls back to
+// the static map for those.
+function targetHandlesOf(node: Node): Record<string, TargetHandleSpec> | undefined {
+  if (node.type !== "imageGeneration") return undefined;
+  const data = node.data as ImageGenerationNodeData;
+  const handles = data.model?.handles ?? [];
+  const resolved: Record<string, TargetHandleSpec> = {
+    // `text` is the node's fixed prompt mechanism (ADR-0007) — present
+    // whenever a Model is selected, not itself schema-derived.
+    ...(data.model ? { text: { dataTypes: ["text"], many: true } } : {}),
+  };
+  for (const handle of handles) {
+    resolved[handle.handleId] = { dataTypes: [handle.dataType], many: handle.many };
+  }
+  return resolved;
 }
 
 function graphNodes(canvas: Canvas): Node[] {
@@ -329,6 +352,7 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
           targetHandle: edge.targetHandle ?? null,
         })),
         sourceDataType: sourceMediaDataType(sourceNode),
+        targetHandles: targetHandlesOf(targetNode),
       });
     },
     [nodes, edges],

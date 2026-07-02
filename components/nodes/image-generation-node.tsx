@@ -25,16 +25,19 @@ import { imageGenerationMode, imageGenerationModeLabel, modelCategoryLabel } fro
 import { cloneVariants } from "@/lib/variant-clone";
 import { approvedModelsForKind } from "@/app/models-actions";
 import type { Model } from "@/lib/fal-models";
+import { fetchModelInputSchema, deriveInputHandles, type ResolvedHandle } from "@/lib/fal-schema";
 import type { StaticTextReferenceNodeData } from "@/components/nodes/static-text-reference-node";
 
 // The Model recorded on a Generation Node once selected (CONTEXT.md's Model /
-// ADR-0007): just enough to show the picker's current value and drive the
-// node's label. Issue #30 adds the schema-derived `handles` snapshot
-// (ADR-0008) on top of this same field — not part of this slice.
+// ADR-0007): enough to show the picker's current value, drive the node's
+// label, AND (issue #30 / ADR-0008) the resolved Input Handle set snapshotted
+// from that one endpoint's FAL schema at selection time — never re-derived
+// live on load.
 export type SelectedModel = {
   endpointId: string;
   name: string;
   category: Model["category"];
+  handles: ResolvedHandle[];
 };
 
 export type ImageGenerationNodeData = {
@@ -115,6 +118,14 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   const modeLabel = selectedModel
     ? modelCategoryLabel(selectedModel.category)
     : imageGenerationModeLabel(mode);
+
+  // Input Handle layout (ADR-0007 / ADR-0008 / issue #30): `text` is the
+  // node's fixed prompt mechanism — present whenever a Model is selected,
+  // never itself schema-derived — followed by one handle per entry in the
+  // Model's snapshotted, schema-derived handle set, in schema order.
+  const inputHandleLayout: ResolvedHandle[] = selectedModel
+    ? [{ handleId: "text", label: "text", dataType: "text", many: true }, ...selectedModel.handles]
+    : [];
 
   const { getNode, getEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
   const { duplicate, remove } = useNodeActions(id);
@@ -272,8 +283,11 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
 
         {/* Model picker (CONTEXT.md's Model / issue #29): lists Approved
             image-output Models only. Selecting one writes endpointId, name
-            and category through to data.model (ADR-0002) — handles aren't
-            derived yet (issue #30). */}
+            and category through to data.model (ADR-0002), and — issue #30 /
+            ADR-0008 — lazily fetches that one endpoint's FAL input schema,
+            derives its Input Handles, and snapshots them alongside it. The
+            snapshot is what the handles below render from; it's never
+            re-derived live on load. */}
         {approvedModels && approvedModels.length > 0 && (
           <select
             aria-label="Model"
@@ -281,10 +295,20 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
             value={selectedModel?.endpointId ?? ""}
             onChange={(event) => {
               const chosen = approvedModels.find((m) => m.endpointId === event.target.value);
-              updateNodeData(id, {
-                model: chosen
-                  ? { endpointId: chosen.endpointId, name: chosen.name, category: chosen.category }
-                  : null,
+              if (!chosen) {
+                updateNodeData(id, { model: null });
+                return;
+              }
+              void fetchModelInputSchema(chosen.endpointId).then((schema) => {
+                const handles = deriveInputHandles(schema, chosen.endpointId);
+                updateNodeData(id, {
+                  model: {
+                    endpointId: chosen.endpointId,
+                    name: chosen.name,
+                    category: chosen.category,
+                    handles,
+                  },
+                });
               });
             }}
           >
@@ -324,20 +348,22 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
       </button>
 
-      <HandleBadge
-        type="target"
-        position={Position.Left}
-        id="text"
-        dataType="text"
-        style={{ top: "35%" }}
-      />
-      <HandleBadge
-        type="target"
-        position={Position.Left}
-        id="image"
-        dataType="image"
-        style={{ top: "65%" }}
-      />
+      {/* Input Handles (ADR-0007 / ADR-0008 / issue #30): none until a Model
+          is selected. Once selected, `text` stays the node's fixed prompt
+          mechanism (not schema-derived — ADR-0007), followed by one handle
+          per entry in the Model's snapshotted schema-derived handle set,
+          evenly spaced down the left edge. */}
+      {selectedModel &&
+        inputHandleLayout.map(({ handleId, dataType }, index) => (
+          <HandleBadge
+            key={handleId}
+            type="target"
+            position={Position.Left}
+            id={handleId}
+            dataType={dataType}
+            style={{ top: `${((index + 1) / (inputHandleLayout.length + 1)) * 100}%` }}
+          />
+        ))}
       <HandleBadge type="source" position={Position.Right} dataType="image" />
     </div>
   );
