@@ -823,6 +823,166 @@ describe("VideoGenerationNode schema-derived Input Handles (issue #31)", () => {
   });
 });
 
+describe("VideoGenerationNode edge reconciliation on Model change (issue #33)", () => {
+  const kling: Model = {
+    endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+    name: "Kling Video v3 Pro",
+    category: "image-to-video",
+    description: "",
+    tags: [],
+  };
+  const textToVideoModel: Model = {
+    endpointId: "fal-ai/text-to-video-only",
+    name: "Text To Video Only",
+    category: "text-to-video",
+    description: "",
+    tags: [],
+  };
+
+  const klingSchema = {
+    paths: {
+      "/fal-ai/kling-video/v3/pro/image-to-video": {
+        post: {
+          requestBody: {
+            content: { "application/json": { schema: { $ref: "#/components/schemas/KlingInput" } } },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        KlingInput: {
+          properties: {
+            start_image_url: { type: "string" },
+            end_image_url: { type: "string" },
+          },
+        },
+      },
+    },
+  };
+  // A Model whose schema has no media inputs at all (pure text-to-video) —
+  // switching to it should drop an edge into start_image_url, since that
+  // handle no longer exists.
+  const textToVideoSchema = {
+    paths: {
+      "/fal-ai/text-to-video-only": {
+        post: {
+          requestBody: {
+            content: { "application/json": { schema: { $ref: "#/components/schemas/T2VInput" } } },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        T2VInput: { properties: { prompt: { type: "string" } } },
+      },
+    },
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function renderWithConnectedReferences(initialModel: VideoGenerationNodeData["model"]) {
+    const user = userEvent.setup();
+    let getEdgesRef: (() => Edge[]) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "media1",
+          type: "staticMediaReference",
+          position: { x: -300, y: 0 },
+          initialWidth: 200,
+          initialHeight: 200,
+          data: { asset: { id: "a1", type: "image", url: "https://example.com/a.png", name: "a.png" } },
+        },
+        {
+          id: "text1",
+          type: "staticTextReference",
+          position: { x: -300, y: 300 },
+          initialWidth: 200,
+          initialHeight: 150,
+          data: { text: "a description" },
+        },
+        {
+          id: "gen1",
+          type: "videoGeneration",
+          position: { x: 200, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "", history: { entries: [], activeId: null }, model: initialModel },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([
+        { id: "e-media", source: "media1", target: "gen1", targetHandle: "start_image_url" },
+        { id: "e-text", source: "text1", target: "gen1", targetHandle: "text" },
+      ]);
+      const { getEdges } = useReactFlow();
+      getEdgesRef = getEdges as () => Edge[];
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    return { user, getEdgesRef: () => getEdgesRef! };
+  }
+
+  it("drops an input edge whose handle is absent from the newly-selected Model's schema", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling, textToVideoModel]);
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockImplementation(async (endpointId: string) =>
+      endpointId === "fal-ai/kling-video/v3/pro/image-to-video" ? klingSchema : textToVideoSchema,
+    );
+    const { user, getEdgesRef } = renderWithConnectedReferences({
+      endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+      name: "Kling Video v3 Pro",
+      category: "image-to-video",
+      handles: [{ handleId: "start_image_url", label: "start_image_url", dataType: "image", many: false }],
+      hasNegativePrompt: false,
+    });
+
+    expect(getEdgesRef()()).toHaveLength(2);
+
+    const picker = await screen.findByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/text-to-video-only");
+
+    await waitFor(() => {
+      expect(getEdgesRef()().map((e) => e.id)).toEqual(["e-text"]);
+    });
+  });
+
+  it("keeps input edges whose handle is still present and type-compatible after re-selecting the same Model", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling]);
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue(klingSchema);
+    const { user, getEdgesRef } = renderWithConnectedReferences({
+      endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+      name: "Kling Video v3 Pro",
+      category: "image-to-video",
+      handles: [{ handleId: "start_image_url", label: "start_image_url", dataType: "image", many: false }],
+      hasNegativePrompt: false,
+    });
+
+    const picker = await screen.findByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/kling-video/v3/pro/image-to-video");
+
+    await waitFor(() => {
+      expect(getEdgesRef()().map((e) => e.id).sort()).toEqual(["e-media", "e-text"]);
+    });
+  });
+});
+
 describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
   const kling: Model = {
     endpointId: "fal-ai/kling-video/v3/pro/image-to-video",

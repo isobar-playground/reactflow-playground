@@ -26,6 +26,7 @@ import { cloneVariants } from "@/lib/variant-clone";
 import { approvedModelsForKind } from "@/app/models-actions";
 import type { Model } from "@/lib/fal-models";
 import { fetchModelInputSchema, deriveInputHandles, type ResolvedHandle } from "@/lib/fal-schema";
+import { reconcileEdges, resolveEdgeDataTypeFromNodes } from "@/lib/edge-reconcile";
 import type { StaticTextReferenceNodeData } from "@/components/nodes/static-text-reference-node";
 
 // The Model recorded on a Generation Node once selected (CONTEXT.md's Model /
@@ -129,7 +130,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
     ? [{ handleId: "text", label: "text", dataType: "text", many: true }, ...selectedModel.handles]
     : [];
 
-  const { getNode, getEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
+  const { getNode, getEdges, setEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
   const { duplicate, remove } = useNodeActions(id);
 
   // Variant cloning (CONTEXT.md / issue #12): when the counter is above one,
@@ -305,7 +306,12 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
             ADR-0008 — lazily fetches that one endpoint's FAL input schema,
             derives its Input Handles, and snapshots them alongside it. The
             snapshot is what the handles below render from; it's never
-            re-derived live on load. */}
+            re-derived live on load. Re-selecting (issue #33 / ADR-0008):
+            recomputing the snapshot also reconciles this node's existing
+            input edges against the new handle set, silently dropping any
+            (per ADR-0004) whose handle is now absent or type-incompatible —
+            re-picking the same Model is a no-op since its handles are
+            unchanged. */}
         {approvedModels && approvedModels.length > 0 && (
           <select
             aria-label="Model"
@@ -315,6 +321,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
               const chosen = approvedModels.find((m) => m.endpointId === event.target.value);
               if (!chosen) {
                 updateNodeData(id, { model: null });
+                setEdges((edges) => reconcileEdges(edges, id, [], resolveEdgeDataTypeFromNodes(getNode)));
                 return;
               }
               void fetchModelInputSchema(chosen.endpointId).then((schema) => {
@@ -328,6 +335,9 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
                     hasNegativePrompt,
                   },
                 });
+                setEdges((edges) =>
+                  reconcileEdges(edges, id, handles, resolveEdgeDataTypeFromNodes(getNode)),
+                );
               });
             }}
           >

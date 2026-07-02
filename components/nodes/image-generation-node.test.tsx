@@ -18,6 +18,7 @@ import { StaticTextReferenceNode } from "./static-text-reference-node";
 import { StaticMediaReferenceNode } from "./static-media-reference-node";
 import type { Model } from "@/lib/fal-models";
 import nanoBanana2EditSchema from "@/lib/__fixtures__/nano-banana-2-edit.json";
+import fluxSchnellSchema from "@/lib/__fixtures__/flux-schnell.json";
 
 vi.mock("@/app/models-actions", () => ({
   approvedModelsForKind: vi.fn().mockResolvedValue([]),
@@ -1028,6 +1029,133 @@ describe("ImageGenerationNode schema-derived Input Handles (issue #30)", () => {
 
     expect(document.querySelector('.react-flow__handle[data-handleid="image_urls"]')).not.toBeNull();
     expect(fetchSchema).not.toHaveBeenCalled();
+  });
+});
+
+describe("ImageGenerationNode edge reconciliation on Model change (issue #33)", () => {
+  const editModel: Model = {
+    endpointId: "fal-ai/nano-banana-2/edit",
+    name: "Nano Banana 2 Edit",
+    category: "image-to-image",
+    description: "",
+    tags: [],
+  };
+  const fluxSchnell: Model = {
+    endpointId: "fal-ai/flux/schnell",
+    name: "FLUX.1 [schnell]",
+    category: "text-to-image",
+    description: "",
+    tags: [],
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Builds a canvas with a Static Media Reference (holding an image asset)
+  // wired into the Image Generation Node's image_urls handle, and a Static
+  // Text Reference wired into its fixed text handle — the scenario issue
+  // #33's acceptance criteria describes: switching to a Model whose schema
+  // no longer exposes image_urls should silently drop only that edge.
+  function renderWithConnectedReferences(initialModel: ImageGenerationNodeData["model"]) {
+    const user = userEvent.setup();
+    let getEdgesRef: (() => Edge[]) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "media1",
+          type: "staticMediaReference",
+          position: { x: -300, y: 0 },
+          initialWidth: 200,
+          initialHeight: 200,
+          data: { asset: { id: "a1", type: "image", url: "https://example.com/a.png", name: "a.png" } },
+        },
+        {
+          id: "text1",
+          type: "staticTextReference",
+          position: { x: -300, y: 300 },
+          initialWidth: 200,
+          initialHeight: 150,
+          data: { text: "a description" },
+        },
+        {
+          id: "gen1",
+          type: "imageGeneration",
+          position: { x: 200, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "", history: { entries: [], activeId: null }, model: initialModel },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([
+        { id: "e-media", source: "media1", target: "gen1", targetHandle: "image_urls" },
+        { id: "e-text", source: "text1", target: "gen1", targetHandle: "text" },
+      ]);
+      const { getEdges } = useReactFlow();
+      getEdgesRef = getEdges as () => Edge[];
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    return { user, getEdgesRef: () => getEdgesRef! };
+  }
+
+  it("drops an input edge whose handle is absent from the newly-selected Model's schema", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([editModel, fluxSchnell]);
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockImplementation(async (endpointId: string) =>
+      endpointId === "fal-ai/nano-banana-2/edit" ? nanoBanana2EditSchema : fluxSchnellSchema,
+    );
+    const { user, getEdgesRef } = renderWithConnectedReferences({
+      endpointId: "fal-ai/nano-banana-2/edit",
+      name: "Nano Banana 2 Edit",
+      category: "image-to-image",
+      handles: [{ handleId: "image_urls", label: "image_urls", dataType: "image", many: true }],
+      hasNegativePrompt: false,
+    });
+
+    expect(getEdgesRef()()).toHaveLength(2);
+
+    const picker = await screen.findByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/flux/schnell");
+
+    await waitFor(() => {
+      const remaining = getEdgesRef()();
+      expect(remaining.map((e) => e.id)).toEqual(["e-text"]);
+    });
+  });
+
+  it("keeps input edges whose handle is still present and type-compatible after the Model change", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([editModel]);
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue(nanoBanana2EditSchema);
+    const { user, getEdgesRef } = renderWithConnectedReferences({
+      endpointId: "fal-ai/nano-banana-2/edit",
+      name: "Nano Banana 2 Edit",
+      category: "image-to-image",
+      handles: [{ handleId: "image_urls", label: "image_urls", dataType: "image", many: true }],
+      hasNegativePrompt: false,
+    });
+
+    // Re-selecting the SAME Model recomputes the snapshot but must be a
+    // no-op for edges (issue #33 acceptance criteria).
+    const picker = await screen.findByRole("combobox", { name: /model/i });
+    await user.selectOptions(picker, "fal-ai/nano-banana-2/edit");
+
+    await waitFor(() => {
+      expect(getEdgesRef()().map((e) => e.id).sort()).toEqual(["e-media", "e-text"]);
+    });
   });
 });
 
