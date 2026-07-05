@@ -1,6 +1,6 @@
 # React Flow Playground
 
-A sandbox for stress-testing the "Canvas approach" to asset generation — a node/edge graph (built on React Flow) where references and generation steps are wired together. The asset-generation logic itself is mocked; the goal is to exercise React Flow's behaviour, not to produce real assets.
+A sandbox for stress-testing the "Canvas approach" to asset generation — a node/edge graph (built on React Flow) where references and generation steps are wired together. Generation is real: a Generation Node runs its selected Model on FAL, and every run has a price (see Estimated Price and Actual Cost).
 
 ## Language
 
@@ -23,7 +23,7 @@ _Avoid_: Static Image Reference, Static Video Reference
 A Reference that holds user-entered text, which other nodes can consume (e.g. as part of a prompt).
 
 **Generation Node**:
-A node that selects a Model, takes one or more inputs (References or other Generation Nodes), holds a prompt, and produces an output asset when "Generate" is triggered. Comes in two kinds: an Image Generation Node and a Video Generation Node. Until a Model is selected it has no input handles; the selected Model's input schema defines them (see Model and Connection rules). If the selected Model's schema has a `negative_prompt`, the node also shows an optional negative-prompt field beneath the prompt — an editable **config field**, not an Input Handle, and not part of the Resolved Prompt. Other scalar parameters (guidance, steps, seed, …) are not surfaced.
+A node that selects a Model, takes one or more inputs (References or other Generation Nodes), holds a prompt, and produces an output asset by running its selected Model on FAL when "Generate" is triggered — without a Model selected there is nothing to run, so Generate is unavailable. Comes in two kinds: an Image Generation Node and a Video Generation Node. Until a Model is selected it has no input handles; the selected Model's input schema defines them (see Model and Connection rules). If the selected Model's schema has a `negative_prompt`, the node also shows an optional negative-prompt field beneath the prompt — an editable **config field**, not an Input Handle, and not part of the Resolved Prompt. Other scalar parameters (guidance, steps, seed, …) are not surfaced.
 _Avoid_: Generator, asset node
 
 **Image Generation Node**:
@@ -36,7 +36,7 @@ A Generation Node whose output is a video.
 The final prompt a Generation Node uses: the text of all connected Static Text References (in edge order) concatenated with the node's own local prompt field.
 
 **History**:
-The ordered list of outputs a single Generation Node has produced over time, shown as a carousel inside the node. There is no carousel until a second output exists. One entry is the Active Output.
+The ordered list of outputs a single Generation Node has produced over time, shown as a carousel inside the node. There is no carousel until a second output exists. One entry is the Active Output. Each entry records the Actual Cost of the generation that produced it.
 _Avoid_: Variants, gallery
 
 **Active Output**:
@@ -61,6 +61,14 @@ _Avoid_: Endpoint (in UI), algorithm
 **Input Handle**:
 A typed connection point where a reference feeds into a Generation Node. A node's input handles are not fixed per node type — they are derived from the selected Model's FAL input schema: each media or text input in the schema becomes one input handle, labelled with the schema field name (e.g. `image_urls`, `start_image_url`, `prompt`), typed image / video / text, accepting *many* if the field is an array else *one*. Scalar generation parameters (guidance, steps, duration, seed, …) are not input handles. Inputs of media types the app doesn't model (audio, pdf) get no handle.
 _Avoid_: input reference, input port, slot
+
+**Estimated Price**:
+The approximate amount a Generation Node shows before generating: the selected Model's FAL unit price × the estimated billable units for one run, × the variant count. Unit estimation is deliberately naive — 1 unit for per-image and per-megapixel pricing, the schema's default duration for per-second pricing. It is an estimate, never a quote, and never what gets recorded — that is the Actual Cost.
+_Avoid_: Cost (that's the actual one), quote
+
+**Actual Cost**:
+What one generation really cost, as billed by FAL: the billable units FAL reports for the finished run × the Model's unit price. Recorded on the History entry it produced and shown with the output; a canvas also shows the running sum of all its nodes' Actual Costs.
+_Avoid_: Price (that's the estimate), spend
 
 **Model Catalog**:
 The set of Models the app can show. Sourced live from FAL rather than stored by the app, and joined against the app's approvals for display.
