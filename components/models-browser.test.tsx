@@ -173,6 +173,60 @@ describe("ModelsBrowser (search and filters)", () => {
     expect(screen.getByText(/no models match/i)).toBeInTheDocument();
   });
 
+  it("lists only derived families with >= 2 Models in the dropdown", () => {
+    const klingVideo = model({ endpointId: "fal-ai/kling-video/v3", name: "Kling Video" });
+    const klingImage = model({ endpointId: "fal-ai/kling-image/v2", name: "Kling Image" });
+    const oneOff = model({ endpointId: "fal-ai/one-off-thing/v1", name: "One Off" });
+
+    render(<ModelsBrowser models={[klingVideo, klingImage, oneOff]} />);
+
+    const familySelect = screen.getByRole("combobox", { name: /family/i });
+    expect(within(familySelect).getByText("Kling")).toBeInTheDocument();
+    expect(within(familySelect).queryByText("One Off")).not.toBeInTheDocument();
+  });
+
+  it("narrows the list when a family is chosen, and 'All families' clears it", async () => {
+    const klingVideo = model({ endpointId: "fal-ai/kling-video/v3", name: "Kling Video" });
+    const klingImage = model({ endpointId: "fal-ai/kling-image/v2", name: "Kling Image" });
+    const ltx = model({ endpointId: "fal-ai/ltx/dev", name: "LTX Model" });
+    const ltxVideo = model({ endpointId: "fal-ai/ltx-video/v1", name: "LTX Video Model" });
+
+    render(<ModelsBrowser models={[klingVideo, klingImage, ltx, ltxVideo]} />);
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: /family/i }),
+      "Kling",
+    );
+
+    expect(screen.getByText("Kling Video")).toBeInTheDocument();
+    expect(screen.getByText("Kling Image")).toBeInTheDocument();
+    expect(screen.queryByText("LTX Model")).not.toBeInTheDocument();
+    expect(screen.queryByText("LTX Video Model")).not.toBeInTheDocument();
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: /family/i }),
+      "All families",
+    );
+
+    expect(screen.getByText("Kling Video")).toBeInTheDocument();
+    expect(screen.getByText("LTX Model")).toBeInTheDocument();
+  });
+
+  it("keeps a singleton-family Model findable via search though absent from the dropdown", async () => {
+    const klingVideo = model({ endpointId: "fal-ai/kling-video/v3", name: "Kling Video" });
+    const klingImage = model({ endpointId: "fal-ai/kling-image/v2", name: "Kling Image" });
+    const oneOff = model({ endpointId: "fal-ai/one-off-thing/v1", name: "One Off Model" });
+
+    render(<ModelsBrowser models={[klingVideo, klingImage, oneOff]} />);
+
+    const familySelect = screen.getByRole("combobox", { name: /family/i });
+    expect(within(familySelect).queryByText("One Off Model")).not.toBeInTheDocument();
+
+    await userEvent.type(screen.getByRole("searchbox"), "One Off");
+
+    expect(screen.getByText("One Off Model")).toBeInTheDocument();
+  });
+
   it("orders newest-added first by default and flips when sorted oldest", async () => {
     const old = model({ endpointId: "a", name: "Old Model", addedAt: "2025-01-01T00:00:00Z" });
     const recent = model({ endpointId: "b", name: "Recent Model", addedAt: "2026-06-01T00:00:00Z" });

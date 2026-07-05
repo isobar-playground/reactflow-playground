@@ -12,6 +12,7 @@ import {
   type ApprovalFilter,
   type SortOrder,
 } from "@/lib/model-filter";
+import { familyOptions } from "@/lib/model-family";
 
 // The `/models` page: browses the Model Catalog fetched live from FAL
 // (ADR-0006) and joins it against the app's approvals. Each Model carries an
@@ -29,14 +30,21 @@ export function ModelsBrowser({
 }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<ModelCategory | "all">("all");
+  const [family, setFamily] = useState<string>("all");
   const [approval, setApproval] = useState<ApprovalFilter>("all");
   const [sort, setSort] = useState<SortOrder>("newest");
 
   const approvedSet = useMemo(() => new Set(approvedIds), [approvedIds]);
 
+  // Families to offer in the dropdown (>= 2 loaded Models — ADR-0010); a
+  // singleton token has no dropdown option but stays reachable via the
+  // existing text search.
+  const families = useMemo(() => familyOptions(models), [models]);
+
   const visible = useMemo(
-    () => filterModels(models, { query, category, approval, approvedIds, sort }),
-    [models, query, category, approval, approvedIds, sort],
+    () =>
+      filterModels(models, { query, category, family, approval, approvedIds, sort }),
+    [models, query, category, family, approval, approvedIds, sort],
   );
 
   // The catalog itself being empty (FAL returned nothing) is distinct from a
@@ -74,6 +82,22 @@ export function ModelsBrowser({
             {SURFACED_CATEGORIES.map((c) => (
               <option key={c} value={c}>
                 {c}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Family</span>
+          <select
+            aria-label="Filter by family"
+            value={family}
+            onChange={(event) => setFamily(event.target.value)}
+            className="rounded-md border border-border bg-background px-2 py-2 text-sm"
+          >
+            <option value="all">All families</option>
+            {families.map((f) => (
+              <option key={f} value={f}>
+                {f}
               </option>
             ))}
           </select>

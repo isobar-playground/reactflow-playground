@@ -173,6 +173,71 @@ describe("modelsForKind — output-modality grouping (PRD #28 item D)", () => {
   });
 });
 
+describe("filterModels — family narrowing (issue #44)", () => {
+  it("narrows to models whose derived family matches", () => {
+    const kling = model({ endpointId: "fal-ai/kling-video/v3" });
+    const ltx = model({ endpointId: "fal-ai/ltx/dev" });
+
+    expect(filterModels([kling, ltx], { family: "Kling" })).toEqual([kling]);
+  });
+
+  it("merges fragmenting endpoint ids under one family", () => {
+    const klingVideo = model({ endpointId: "fal-ai/kling-video/v3" });
+    const klingImage = model({ endpointId: "fal-ai/kling-image/v2" });
+    const ltx = model({ endpointId: "fal-ai/ltx/dev" });
+
+    expect(filterModels([klingVideo, klingImage, ltx], { family: "Kling" })).toEqual([
+      klingVideo,
+      klingImage,
+    ]);
+  });
+
+  it("treats an 'all' or unset family as no narrowing", () => {
+    const kling = model({ endpointId: "fal-ai/kling-video/v3" });
+    const ltx = model({ endpointId: "fal-ai/ltx/dev" });
+
+    expect(filterModels([kling, ltx], { family: "all" })).toEqual([kling, ltx]);
+    expect(filterModels([kling, ltx], {})).toEqual([kling, ltx]);
+  });
+
+  it("composes with category, approval, query, and sort", () => {
+    const target = model({
+      endpointId: "fal-ai/kling-video/v3",
+      name: "Kling Video",
+      category: "text-to-video",
+      addedAt: "2026-01-01T00:00:00Z",
+    });
+    const wrongFamily = model({
+      endpointId: "fal-ai/ltx/dev",
+      name: "LTX Video",
+      category: "text-to-video",
+    });
+    const wrongCategory = model({
+      endpointId: "fal-ai/kling-image/v2",
+      name: "Kling Image",
+      category: "text-to-image",
+    });
+    const notApproved = model({
+      endpointId: "fal-ai/kling-video/v2",
+      name: "Kling Video 2",
+      category: "text-to-video",
+    });
+
+    const result = filterModels(
+      [target, wrongFamily, wrongCategory, notApproved],
+      {
+        family: "Kling",
+        category: "text-to-video",
+        approval: "approved",
+        approvedIds: ["fal-ai/kling-video/v3"],
+        query: "kling",
+      },
+    );
+
+    expect(result).toEqual([target]);
+  });
+});
+
 describe("filterModels — combinations and empty result", () => {
   it("applies query, category, and approval together", () => {
     const target = model({

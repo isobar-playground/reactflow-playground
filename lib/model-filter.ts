@@ -8,6 +8,7 @@
 // query like "Google" or "KLING" surface that provider's models (PRD #24).
 
 import type { Model, ModelCategory } from "./fal-models";
+import { deriveFamily } from "./model-family";
 
 export type ApprovalFilter = "all" | "approved" | "not-approved";
 export type SortOrder = "newest" | "oldest" | "name";
@@ -17,6 +18,8 @@ export interface FilterCriteria {
   query?: string;
   /** Narrow to one category; unset means all categories. */
   category?: ModelCategory | "all";
+  /** Narrow to one derived Family (ADR-0010); "all"/unset means no narrowing. */
+  family?: string;
   /** Narrow by approval state; unset means all. */
   approval?: ApprovalFilter;
   /** The approved endpoint ids, needed to evaluate the approval filter. */
@@ -31,6 +34,7 @@ export function filterModels(
 ): Model[] {
   const query = criteria.query?.trim().toLowerCase() ?? "";
   const category = criteria.category ?? "all";
+  const family = criteria.family ?? "all";
   const approval = criteria.approval ?? "all";
   const approvedIds = new Set(criteria.approvedIds ?? []);
 
@@ -38,6 +42,7 @@ export function filterModels(
     (m) =>
       matchesQuery(m, query) &&
       (category === "all" || m.category === category) &&
+      (family === "all" || deriveFamily(m.endpointId) === family) &&
       matchesApproval(approval, approvedIds.has(m.endpointId)),
   );
 
