@@ -31,6 +31,7 @@ import type { ResolvedHandle } from "@/lib/fal-schema";
 import type { MediaHandleConnection } from "@/lib/generation-payload";
 import type { ModelPricing } from "@/lib/fal-pricing";
 import { estimatePrice, formatEstimatedPrice } from "@/lib/price-estimate";
+import { computeActualCost, formatActualCost } from "@/lib/actual-cost";
 import { reconcileEdges, resolveEdgeDataTypeFromNodes } from "@/lib/edge-reconcile";
 import type { StaticTextReferenceNodeData } from "@/components/nodes/static-text-reference-node";
 
@@ -236,8 +237,10 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
     setGenerationError(null);
     resumeImageGeneration(pending)
       .then((result) => {
+        const { billableUnits, ...output } = result;
+        const actualCost = computeActualCost({ pricing: selectedModel?.pricing, billableUnits });
         updateNodeData(id, {
-          history: appendEntry(history, { id: crypto.randomUUID(), prompt, output: result }),
+          history: appendEntry(history, { id: crypto.randomUUID(), prompt, output, actualCost }),
           pendingGeneration: null,
         });
       })
@@ -293,17 +296,21 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
     );
     const clonesWithOutput = clones.map((clone, index) => {
       const result = generated[index];
+      if (!result) {
+        return { ...clone, data: { ...clone.data, history: clone.data.history } };
+      }
+      const { billableUnits, ...output } = result;
+      const actualCost = computeActualCost({ pricing: selectedModel.pricing, billableUnits });
       return {
         ...clone,
         data: {
           ...clone.data,
-          history: result
-            ? appendEntry(clone.data.history as NodeHistory, {
-                id: crypto.randomUUID(),
-                prompt,
-                output: result,
-              })
-            : clone.data.history,
+          history: appendEntry(clone.data.history as NodeHistory, {
+            id: crypto.randomUUID(),
+            prompt,
+            output,
+            actualCost,
+          }),
         },
       };
     });
@@ -338,8 +345,10 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         { endpointId: selectedModel.endpointId, prompt: resolvedPromptText, negativePrompt, media: mediaConnections },
         { onPending: (pending) => updateNodeData(id, { pendingGeneration: pending }) },
       );
+      const { billableUnits, ...output } = result;
+      const actualCost = computeActualCost({ pricing: selectedModel.pricing, billableUnits });
       updateNodeData(id, {
-        history: appendEntry(history, { id: crypto.randomUUID(), prompt, output: result }),
+        history: appendEntry(history, { id: crypto.randomUUID(), prompt, output, actualCost }),
         pendingGeneration: null,
       });
     } catch (error) {
@@ -388,26 +397,46 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         </div>
       )}
 
+      {/* Actual Cost (CONTEXT.md / ADR-0009, issue #41): shown with the
+          Active Output once its generation completed with both a
+          billable-units figure and a resolvable pricing snapshot. No amount
+          for older placeholder entries, a missing header, or a Model with
+          no pricing snapshot. */}
+      {activeEntry && formatActualCost(activeEntry.actualCost) && (
+        <div className="mb-3 text-xs text-muted-foreground">
+          {formatActualCost(activeEntry.actualCost)}
+        </div>
+      )}
+
       {/* History carousel (CONTEXT.md): only appears from the second entry
-          onward, so the node stays simple until there's history. */}
+          onward, so the node stays simple until there's history. Each
+          thumbnail shows its own Actual Cost underneath (issue #41) — the
+          entry keeps its own recorded cost as the Active Output is flipped
+          through. */}
       {history.entries.length >= 2 && (
         <div className="nodrag mb-3 flex gap-1.5 overflow-x-auto">
           {history.entries.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              onClick={() => handleSelectHistoryEntry(entry.id)}
-              className={`h-12 w-12 shrink-0 overflow-hidden rounded-md border ${
-                entry.id === history.activeId ? "border-primary" : "border-border"
-              }`}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={entry.output.url}
-                alt="History entry"
-                className="h-full w-full object-cover"
-              />
-            </button>
+            <div key={entry.id} className="flex shrink-0 flex-col items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => handleSelectHistoryEntry(entry.id)}
+                className={`h-12 w-12 shrink-0 overflow-hidden rounded-md border ${
+                  entry.id === history.activeId ? "border-primary" : "border-border"
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={entry.output.url}
+                  alt="History entry"
+                  className="h-full w-full object-cover"
+                />
+              </button>
+              {formatActualCost(entry.actualCost) && (
+                <span className="text-[10px] text-muted-foreground">
+                  {formatActualCost(entry.actualCost)}
+                </span>
+              )}
+            </div>
           ))}
         </div>
       )}

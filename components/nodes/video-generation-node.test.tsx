@@ -1670,6 +1670,114 @@ describe("VideoGenerationNode resumes a pending generation on mount (issue #39)"
   });
 });
 
+// Actual Cost (CONTEXT.md / ADR-0009, issue #41): mirrors
+// components/nodes/image-generation-node.test.tsx's identical coverage —
+// shown with the output once a generation completes, billable units × the
+// Model's snapshotted unit price.
+describe("VideoGenerationNode Actual Cost (issue #41)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the Actual Cost next to the output once a generation completes", async () => {
+    vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
+      kind: "video",
+      url: "/sample-video.mp4",
+      billableUnits: 5,
+    });
+    const user = userEvent.setup();
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: { ...testModel, pricing: { unitPrice: 0.14, unit: "seconds", currency: "USD" } },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => {
+      expect(document.querySelector("video")).not.toBeNull();
+    });
+
+    expect(screen.getByText("$0.70")).toBeInTheDocument();
+  });
+
+  it("shows no Actual Cost when the result carries no billable-units header", async () => {
+    vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
+      kind: "video",
+      url: "/sample-video.mp4",
+    });
+    const user = userEvent.setup();
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: { ...testModel, pricing: { unitPrice: 0.14, unit: "seconds", currency: "USD" } },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => {
+      expect(document.querySelector("video")).not.toBeNull();
+    });
+
+    expect(screen.queryByText(/^\$/)).not.toBeInTheDocument();
+  });
+
+  it("shows no Actual Cost when the Model has no pricing snapshot", async () => {
+    vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
+      kind: "video",
+      url: "/sample-video.mp4",
+      billableUnits: 5,
+    });
+    const user = userEvent.setup();
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => {
+      expect(document.querySelector("video")).not.toBeNull();
+    });
+
+    expect(screen.queryByText(/^\$/)).not.toBeInTheDocument();
+  });
+
+  it("shows each carousel entry's own Actual Cost as the active output is flipped through", async () => {
+    vi.spyOn(realGeneration, "runVideoGeneration")
+      .mockResolvedValueOnce({ kind: "video", url: "/sample-video-a.mp4", billableUnits: 2 })
+      .mockResolvedValueOnce({ kind: "video", url: "/sample-video-b.mp4", billableUnits: 4 });
+    const user = userEvent.setup();
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: { ...testModel, pricing: { unitPrice: 0.1, unit: "seconds", currency: "USD" } },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(document.querySelector("video")).not.toBeNull());
+    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await waitFor(() => {
+      expect(document.querySelector("video")).toHaveAttribute("src", "/sample-video-b.mp4");
+    });
+    expect(screen.getAllByText("$0.40").length).toBeGreaterThan(0);
+
+    const historyButtons = screen.getAllByRole("button").filter((btn) => btn.querySelector("video"));
+    await user.click(historyButtons[0]);
+
+    expect(screen.getAllByText("$0.20").length).toBeGreaterThan(0);
+  });
+
+  it("persists the Actual Cost across reload (survives via data.history)", () => {
+    renderNode({
+      prompt: "a car",
+      history: {
+        entries: [
+          { id: "a", prompt: "a car", output: { kind: "video", url: "/sample-video.mp4" }, actualCost: 0.42 },
+        ],
+        activeId: "a",
+      },
+      model: testModel,
+    });
+
+    expect(screen.getByText("$0.42")).toBeInTheDocument();
+  });
+});
+
 // Connected media inputs (issue #40 / ADR-0009, PRD #35): mirrors
 // components/nodes/image-generation-node.test.tsx's identical coverage —
 // this node's own tests only check that it gathers and forwards the right

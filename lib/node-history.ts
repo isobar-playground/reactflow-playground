@@ -26,6 +26,14 @@ export interface HistoryEntry {
   id: string;
   prompt: string;
   output: ImagePlaceholderResult | VideoPlaceholderResult;
+  // Actual Cost (CONTEXT.md / ADR-0009, issue #41): what this one generation
+  // really cost — billable units × the Model's snapshotted unit price
+  // (lib/actual-cost.ts), computed once the run settles. Undefined for a
+  // failed run (never recorded), an old placeholder entry predating this
+  // field, a result with no billable-units header, or a node with no
+  // pricing snapshot — CONTEXT.md: such entries "render normally with no
+  // amount."
+  actualCost?: number;
 }
 
 export interface NodeHistory {

@@ -56,6 +56,27 @@ describe("video outputs (issue #11)", () => {
   });
 });
 
+describe("actualCost (CONTEXT.md's Actual Cost / issue #41)", () => {
+  it("carries an entry's actualCost through append and back out via getActiveEntry", () => {
+    const withCost: HistoryEntry = {
+      id: "a",
+      prompt: "a cat",
+      output: { kind: "image", url: "https://fal.media/a.png" },
+      actualCost: 0.12,
+    };
+
+    const history = appendEntry(emptyHistory, withCost);
+
+    expect(getActiveEntry(history)?.actualCost).toBe(0.12);
+  });
+
+  it("leaves actualCost undefined for an entry that never got one (old placeholders, missing header, etc.)", () => {
+    const history = appendEntry(emptyHistory, entry("a", "a cat"));
+
+    expect(getActiveEntry(history)?.actualCost).toBeUndefined();
+  });
+});
+
 describe("history growth", () => {
   it("keeps every entry's own prompt independent of later entries", () => {
     let history = appendEntry(emptyHistory, entry("a", "a cat"));

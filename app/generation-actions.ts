@@ -51,7 +51,11 @@ export async function submitGenerationAction(
 
 export type GenerationPollResult =
   | { status: "pending" }
-  | { status: "completed"; mediaUrl: string }
+  // billableUnits (CONTEXT.md's Actual Cost / ADR-0009, issue #41): FAL's
+  // x-fal-billable-units header, forwarded verbatim from
+  // lib/fal-generation.ts's getGenerationResult; undefined when FAL's result
+  // carried none.
+  | { status: "completed"; mediaUrl: string; billableUnits?: number }
   | { status: "error"; message: string };
 
 // One poll of a pending generation (CONTEXT.md / ADR-0009): still queued or
@@ -67,8 +71,8 @@ export async function pollGenerationAction(
     const { status } = await getGenerationStatus(pending.statusUrl);
     if (status !== "COMPLETED") return { status: "pending" };
 
-    const { mediaUrl } = await getGenerationResult(pending.responseUrl);
-    return { status: "completed", mediaUrl };
+    const { mediaUrl, billableUnits } = await getGenerationResult(pending.responseUrl);
+    return { status: "completed", mediaUrl, billableUnits };
   } catch (error) {
     return {
       status: "error",

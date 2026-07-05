@@ -107,6 +107,23 @@ describe("runImageGeneration", () => {
     ).rejects.toThrow("moderation blocked the request");
   });
 
+  // Actual Cost (CONTEXT.md / ADR-0009, issue #41): the billable-units count
+  // the poll action forwards rides along on the resolved result so the node
+  // component can compute the Actual Cost from it and the Model's
+  // snapshotted unit price.
+  it("resolves with the billableUnits the poll action reports alongside the output", async () => {
+    vi.spyOn(generationActions, "submitGenerationAction").mockResolvedValue(pending);
+    vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
+      status: "completed",
+      mediaUrl: "https://fal.media/out.png",
+      billableUnits: 2,
+    });
+
+    const result = await runImageGeneration({ endpointId: "fal-ai/flux/schnell", prompt: "a red car" });
+
+    expect(result).toEqual({ kind: "image", url: "https://fal.media/out.png", billableUnits: 2 });
+  });
+
   // Connected media inputs (issue #40 / ADR-0009): the node's snapshotted
   // Model handles + their currently-connected source nodes (lib/generation-payload.ts)
   // are folded into the submitted body, and any local Asset Library asset is

@@ -169,6 +169,34 @@ describe("getGenerationResult", () => {
 
     await expect(getGenerationResult("https://queue.fal.run/x", { fetchImpl })).rejects.toThrow(/500/);
   });
+
+  // Actual Cost (CONTEXT.md / ADR-0009, issue #41): FAL reports no cost
+  // amount directly — only the billed unit count, on the queue result
+  // response's `x-fal-billable-units` header. Read here so the caller can
+  // multiply it by the Model's snapshotted unit price.
+  it("reads the billable-units count from the x-fal-billable-units response header", async () => {
+    const { fetchImpl } = fakeFetch(() =>
+      new Response(JSON.stringify({ images: [{ url: "https://fal.media/a.png" }] }), {
+        status: 200,
+        headers: { "x-fal-billable-units": "2" },
+      }),
+    );
+
+    const result = await getGenerationResult("https://queue.fal.run/x", { fetchImpl });
+
+    expect(result).toEqual({ mediaUrl: "https://fal.media/a.png", billableUnits: 2 });
+  });
+
+  it("omits billableUnits when the result carries no x-fal-billable-units header", async () => {
+    const { fetchImpl } = fakeFetch(() =>
+      new Response(JSON.stringify({ images: [{ url: "https://fal.media/a.png" }] }), { status: 200 }),
+    );
+
+    const result = await getGenerationResult("https://queue.fal.run/x", { fetchImpl });
+
+    expect(result).toEqual({ mediaUrl: "https://fal.media/a.png" });
+    expect(result.billableUnits).toBeUndefined();
+  });
 });
 
 // inlineLocalAssets (issue #40 / ADR-0009): assets from the local Asset

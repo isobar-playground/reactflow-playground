@@ -78,10 +78,20 @@ async function submit(input: RunGenerationInput): Promise<PendingGeneration> {
     : submitGenerationAction(input.endpointId, body);
 }
 
+// Actual Cost (CONTEXT.md / ADR-0009, issue #41): the resolved output plus
+// the FAL-reported billable-units count (lib/fal-generation.ts's
+// `x-fal-billable-units` header, forwarded verbatim through
+// app/generation-actions.ts's pollGenerationAction) — undefined when FAL's
+// result carried none. The node component multiplies this by the Model's
+// snapshotted unit price (lib/actual-cost.ts) before persisting the History
+// entry; this module has no pricing knowledge of its own.
+export type ImageGenerationResult = ImagePlaceholderResult & { billableUnits?: number };
+export type VideoGenerationResult = VideoPlaceholderResult & { billableUnits?: number };
+
 export async function runImageGeneration(
   input: RunImageGenerationInput,
   options: RunImageGenerationOptions = {},
-): Promise<ImagePlaceholderResult> {
+): Promise<ImageGenerationResult> {
   const pending = await submit(input);
   options.onPending?.(pending);
 
@@ -100,7 +110,7 @@ export async function runImageGeneration(
 export async function resumeImageGeneration(
   pending: PendingGeneration,
   options: RunImageGenerationOptions = {},
-): Promise<ImagePlaceholderResult> {
+): Promise<ImageGenerationResult> {
   return pollUntilSettled(pending, options, "image");
 }
 
@@ -112,7 +122,7 @@ export async function resumeImageGeneration(
 export async function runVideoGeneration(
   input: RunVideoGenerationInput,
   options: RunVideoGenerationOptions = {},
-): Promise<VideoPlaceholderResult> {
+): Promise<VideoGenerationResult> {
   const pending = await submit(input);
   options.onPending?.(pending);
 
@@ -125,7 +135,7 @@ export async function runVideoGeneration(
 export async function resumeVideoGeneration(
   pending: PendingGeneration,
   options: RunVideoGenerationOptions = {},
-): Promise<VideoPlaceholderResult> {
+): Promise<VideoGenerationResult> {
   return pollUntilSettled(pending, options, "video");
 }
 
@@ -133,7 +143,7 @@ async function pollUntilSettled<K extends "image" | "video">(
   pending: PendingGeneration,
   options: RunGenerationOptions,
   kind: K,
-): Promise<{ kind: K; url: string }> {
+): Promise<{ kind: K; url: string; billableUnits?: number }> {
   const wait = options.wait ?? defaultWait;
   const intervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 
@@ -146,5 +156,5 @@ async function pollUntilSettled<K extends "image" | "video">(
   if (outcome.status === "error") {
     throw new Error(outcome.message);
   }
-  return { kind, url: outcome.mediaUrl };
+  return { kind, url: outcome.mediaUrl, billableUnits: outcome.billableUnits };
 }

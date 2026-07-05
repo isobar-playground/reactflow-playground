@@ -184,6 +184,35 @@ describe("pollGenerationAction", () => {
     expect((result as { message: string }).message).toMatch(/500/);
   });
 
+  // Actual Cost (CONTEXT.md / ADR-0009, issue #41): the billable-units count
+  // (lib/fal-generation.ts's x-fal-billable-units header) rides along on the
+  // "completed" result so the caller can multiply it by the Model's
+  // snapshotted unit price.
+  it("forwards billableUnits on the completed result when FAL reports it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith("/status")) {
+          return new Response(JSON.stringify({ status: "COMPLETED" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ images: [{ url: "https://fal.media/out.png" }] }), {
+          status: 200,
+          headers: { "x-fal-billable-units": "3" },
+        });
+      }),
+    );
+
+    const { pollGenerationAction } = await import("./generation-actions");
+    const result = await pollGenerationAction(pending);
+
+    expect(result).toEqual({
+      status: "completed",
+      mediaUrl: "https://fal.media/out.png",
+      billableUnits: 3,
+    });
+  });
+
   it("reports an error instead of throwing when the completed result has no image", async () => {
     vi.stubGlobal(
       "fetch",

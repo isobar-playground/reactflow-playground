@@ -92,6 +92,23 @@ export async function getGenerationStatus(
 
 export interface GenerationOutputResult {
   mediaUrl: string;
+  // Actual Cost (CONTEXT.md / ADR-0009, issue #41): FAL's response carries
+  // no cost amount — only this billed unit count, on the queue result
+  // response's `x-fal-billable-units` header. Undefined when the header is
+  // absent or unparsable, in which case the caller records no cost
+  // (CONTEXT.md: "A run whose result carries no billable-units header...
+  // records no cost").
+  billableUnits?: number;
+}
+
+// Parses the `x-fal-billable-units` header (a plain number, e.g. "1" or
+// "2.5" for fractional megapixel pricing) — undefined for a missing or
+// non-numeric header, never thrown, since a missing header just means no
+// Actual Cost is recorded (CONTEXT.md).
+function parseBillableUnits(header: string | null): number | undefined {
+  if (header === null) return undefined;
+  const value = Number(header);
+  return Number.isFinite(value) ? value : undefined;
 }
 
 // FAL's result shapes vary by model and by output modality (issue #39: the
@@ -212,5 +229,6 @@ export async function getGenerationResult(
   if (!mediaUrl) {
     throw new Error("FAL result contained no media URL");
   }
-  return { mediaUrl };
+  const billableUnits = parseBillableUnits(response.headers.get("x-fal-billable-units"));
+  return { mediaUrl, billableUnits };
 }

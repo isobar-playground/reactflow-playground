@@ -1821,6 +1821,113 @@ describe("ImageGenerationNode Estimated Price (issue #37)", () => {
   });
 });
 
+// Actual Cost (CONTEXT.md / ADR-0009, issue #41): shown with the output once
+// a generation completes — billable units (FAL's x-fal-billable-units
+// header, forwarded on runImageGeneration's resolved result) × the Model's
+// snapshotted unit price. Never shown for a run whose result carries no
+// billable-units figure, or a Model with no pricing snapshot.
+describe("ImageGenerationNode Actual Cost (issue #41)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the Actual Cost next to the output once a generation completes", async () => {
+    vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/out.png",
+      billableUnits: 2,
+    });
+    const user = userEvent.setup();
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: { ...testModel, pricing: { unitPrice: 0.08, unit: "images", currency: "USD" } },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await screen.findByRole("img", { name: /output/i });
+
+    expect(screen.getByText("$0.16")).toBeInTheDocument();
+  });
+
+  it("shows no Actual Cost when the result carries no billable-units header", async () => {
+    vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/out.png",
+    });
+    const user = userEvent.setup();
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: { ...testModel, pricing: { unitPrice: 0.08, unit: "images", currency: "USD" } },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await screen.findByRole("img", { name: /output/i });
+
+    expect(screen.queryByText(/^\$/)).not.toBeInTheDocument();
+  });
+
+  it("shows no Actual Cost when the Model has no pricing snapshot", async () => {
+    vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/out.png",
+      billableUnits: 2,
+    });
+    const user = userEvent.setup();
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await screen.findByRole("img", { name: /output/i });
+
+    expect(screen.queryByText(/^\$/)).not.toBeInTheDocument();
+  });
+
+  it("shows each carousel entry's own Actual Cost as the active output is flipped through", async () => {
+    vi.spyOn(realGeneration, "runImageGeneration")
+      .mockResolvedValueOnce({ kind: "image", url: "https://fal.media/a.png", billableUnits: 1 })
+      .mockResolvedValueOnce({ kind: "image", url: "https://fal.media/b.png", billableUnits: 3 });
+    const user = userEvent.setup();
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: { ...testModel, pricing: { unitPrice: 0.1, unit: "images", currency: "USD" } },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await screen.findByRole("img", { name: /output/i });
+    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await waitFor(() => {
+      expect(screen.getByRole("img", { name: /output/i })).toHaveAttribute(
+        "src",
+        "https://fal.media/b.png",
+      );
+    });
+    // The Active Output's own cost display and its carousel thumbnail's cost
+    // label both show $0.30 while entry b is active (CONTEXT.md: shown with
+    // the output AND on each carousel entry).
+    expect(screen.getAllByText("$0.30").length).toBeGreaterThan(0);
+
+    const thumbnails = screen.getAllByRole("img", { name: /history entry/i });
+    await user.click(thumbnails[0]);
+
+    expect(screen.getAllByText("$0.10").length).toBeGreaterThan(0);
+  });
+
+  it("persists the Actual Cost across reload (survives via data.history)", () => {
+    renderNode({
+      prompt: "a cat",
+      history: {
+        entries: [{ id: "a", prompt: "a cat", output: { kind: "image", url: "https://fal.media/a.png" }, actualCost: 0.42 }],
+        activeId: "a",
+      },
+      model: testModel,
+    });
+
+    expect(screen.getByText("$0.42")).toBeInTheDocument();
+  });
+});
+
 // Connected media inputs (issue #40 / ADR-0009, PRD #35): the node's
 // snapshotted Model handles are paired with their currently-connected source
 // nodes and forwarded to runImageGeneration's `media` field, which
