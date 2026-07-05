@@ -63,7 +63,7 @@ A typed connection point where a reference feeds into a Generation Node. A node'
 _Avoid_: input reference, input port, slot
 
 **Estimated Price**:
-The approximate amount a Generation Node shows before generating: the selected Model's FAL unit price × the estimated billable units for one run, × the variant count. Unit estimation is deliberately naive — 1 unit for per-image and per-megapixel pricing, the schema's default duration for per-second pricing. It is an estimate, never a quote, and never what gets recorded — that is the Actual Cost.
+The approximate amount a Generation Node shows before generating: the selected Model's FAL unit price × the estimated billable units for one run, × the variant count. Unit estimation is deliberately naive — 1 unit for per-image, per-megapixel and per-unit pricing, the schema's default duration for per-second pricing. It is an estimate, never a quote, and never what gets recorded — that is the Actual Cost.
 _Avoid_: Cost (that's the actual one), quote
 
 **Actual Cost**:

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { estimatePrice, formatEstimatedPrice } from "./price-estimate";
 
 // price-estimate (CONTEXT.md's Estimated Price / issue #37): a pure module —
-// unit price × naively estimated units (1 for images/megapixels, the
+// unit price × naively estimated units (1 for images/megapixels/units, the
 // schema's default duration for seconds) × variant count. Never a quote.
 
 describe("estimatePrice", () => {
@@ -57,9 +57,18 @@ describe("estimatePrice", () => {
     expect(amount).toBeUndefined();
   });
 
-  it("is undefined for a pricing unit this naive estimation doesn't cover", () => {
+  it("is the unit price for a single variant of a per-unit-priced Model (1 naive unit)", () => {
     const amount = estimatePrice({
       pricing: { unitPrice: 1, unit: "units", currency: "USD" },
+      variantCount: 1,
+    });
+
+    expect(amount).toBe(1);
+  });
+
+  it("is undefined for a pricing unit this naive estimation doesn't cover", () => {
+    const amount = estimatePrice({
+      pricing: { unitPrice: 1, unit: "requests", currency: "USD" },
       variantCount: 1,
     });
 

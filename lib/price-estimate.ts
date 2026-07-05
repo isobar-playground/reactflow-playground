@@ -2,8 +2,8 @@
 // independent of real generation — the Estimated Price for one Generate
 // click, before it happens. It is an estimate, never a quote (that's the
 // Actual Cost, ADR-0009): unit price × naively estimated units for one run
-// (1 for images/megapixels; the Model's schema-derived default duration for
-// seconds) × the variant count.
+// (1 for images/megapixels/units; the Model's schema-derived default
+// duration for seconds) × the variant count.
 
 export interface ModelPricingSnapshot {
   unitPrice: number;
@@ -22,12 +22,13 @@ export interface EstimatePriceInput {
 
 // The naive per-run unit count (CONTEXT.md): deliberately not a real
 // estimate of the model's actual output size — just 1 for images/
-// megapixels, or the schema's default duration for seconds. Any other unit
-// FAL might report has no naive estimate defined here.
+// megapixels/units, or the schema's default duration for seconds. Any other
+// unit FAL might report has no naive estimate defined here.
 function naiveUnitsForOneRun(unit: string, defaultDurationSeconds?: number): number | undefined {
   switch (unit) {
     case "images":
     case "megapixels":
+    case "units":
       return 1;
     case "seconds":
       return defaultDurationSeconds;
