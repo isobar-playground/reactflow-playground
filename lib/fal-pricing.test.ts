@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { fetchModelPricing, fetchPricingBatch, formatUnitPrice } from "./fal-pricing";
+import { fetchModelPricing, fetchPricingBatch, fetchPricingChunk, formatUnitPrice } from "./fal-pricing";
 
 // fal-pricing (ADR-0009 / issue #37): server-only client for FAL's
 // `GET /v1/models/pricing`, mirroring lib/fal-models.ts's injectable-fetch
@@ -185,5 +185,60 @@ describe("fetchPricingBatch", () => {
 
     expect(result.get("fal-ai/model-30")).toEqual({ unitPrice: 0.5, unit: "images", currency: "USD" });
     expect(result.size).toBe(1);
+  });
+});
+
+// fetchPricingChunk (ADR-0010 revision): the un-chunked primitive behind
+// fetchPricingBatch, also used directly by the /models catalog's "load
+// prices anyway" button — unlike fetchPricingBatch, it surfaces a 429's
+// Retry-After so a deliberate retry loop can wait the right amount.
+describe("fetchPricingChunk", () => {
+  it("returns resolved prices for a single request", async () => {
+    const { fetchImpl } = fakeFetch(() =>
+      new Response(
+        JSON.stringify({
+          prices: [{ endpoint_id: "fal-ai/a", unit_price: 0.1, unit: "images", currency: "USD" }],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await fetchPricingChunk(["fal-ai/a"], { fetchImpl });
+
+    expect(result.prices).toEqual(new Map([["fal-ai/a", { unitPrice: 0.1, unit: "images", currency: "USD" }]]));
+    expect(result.retryAfterSeconds).toBeUndefined();
+  });
+
+  it("surfaces retryAfterSeconds from a 429 response's Retry-After header", async () => {
+    const { fetchImpl } = fakeFetch(
+      () =>
+        new Response(JSON.stringify({ error: "Too Many Requests" }), {
+          status: 429,
+          headers: { "retry-after": "37" },
+        }),
+    );
+
+    const result = await fetchPricingChunk(["fal-ai/a"], { fetchImpl });
+
+    expect(result.prices.size).toBe(0);
+    expect(result.retryAfterSeconds).toBe(37);
+  });
+
+  it("leaves retryAfterSeconds undefined on a 429 with no Retry-After header", async () => {
+    const { fetchImpl } = fakeFetch(() => new Response(JSON.stringify({}), { status: 429 }));
+
+    const result = await fetchPricingChunk(["fal-ai/a"], { fetchImpl });
+
+    expect(result.retryAfterSeconds).toBeUndefined();
+  });
+
+  it("returns no prices (not a throw) on a network failure", async () => {
+    const fetchImpl: typeof fetch = async () => {
+      throw new Error("network down");
+    };
+
+    const result = await fetchPricingChunk(["fal-ai/a"], { fetchImpl });
+
+    expect(result.prices.size).toBe(0);
   });
 });

@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { approveModelAction, fetchCatalogPricingAction, unapproveModelAction } from "@/app/models-actions";
+import {
+  approveModelAction,
+  fetchCatalogPricingAction,
+  fetchCatalogPricingChunkAction,
+  unapproveModelAction,
+} from "@/app/models-actions";
 import {
   SURFACED_CATEGORIES,
   type Model,
@@ -21,6 +26,20 @@ import { formatUnitPrice, type ModelPricing } from "@/lib/fal-pricing";
 // further chunk often 429s. Auto-fetching stays within a single chunk;
 // wider result sets just show no price until the user narrows their search.
 const MAX_AUTO_PRICING_MODELS = 30;
+
+// Polite pause (seconds) between "load prices anyway" chunks that FAL
+// didn't rate-limit — a successful chunk carries no Retry-After to go by.
+const MANUAL_LOAD_DELAY_SECONDS = 1;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
 
 // The `/models` page: browses the Model Catalog fetched live from FAL
 // (ADR-0006) and joins it against the app's approvals. Each Model carries an
@@ -81,6 +100,51 @@ export function ModelsBrowser({
       cancelled = true;
     };
   }, [visible]);
+
+  // "Load prices anyway" (ADR-0010 revision): the manual escape hatch above
+  // MAX_AUTO_PRICING_MODELS. Fetches the full visible set chunk-by-chunk
+  // (progressively filling in pricingByEndpoint as each chunk resolves —
+  // the "paczki" a narrower search gets for free), waiting out a chunk's
+  // Retry-After when FAL rate-limits it rather than guessing a backoff.
+  // Cancellable (component unmount, or a fresh click) since a full run over
+  // an unfiltered catalog can take a long time.
+  const [manualLoad, setManualLoad] = useState<{ done: number; total: number } | null>(null);
+  const manualLoadCancelledRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      manualLoadCancelledRef.current = true;
+    };
+  }, []);
+
+  async function handleLoadPricesAnyway() {
+    manualLoadCancelledRef.current = false;
+
+    const missingIds = visible
+      .map((m) => m.endpointId)
+      .filter((id) => !requestedIds.current.has(id));
+    const chunks = chunk(missingIds, MAX_AUTO_PRICING_MODELS);
+    if (chunks.length === 0) return;
+
+    setManualLoad({ done: 0, total: chunks.length });
+
+    for (const [index, ids] of chunks.entries()) {
+      if (manualLoadCancelledRef.current) return;
+
+      for (const id of ids) requestedIds.current.add(id);
+      const { prices, retryAfterSeconds } = await fetchCatalogPricingChunkAction(ids);
+      if (manualLoadCancelledRef.current) return;
+
+      setPricingByEndpoint((prev) => ({ ...prev, ...prices }));
+      setManualLoad({ done: index + 1, total: chunks.length });
+
+      if (index < chunks.length - 1) {
+        await sleep((retryAfterSeconds ?? MANUAL_LOAD_DELAY_SECONDS) * 1000);
+      }
+    }
+
+    if (!manualLoadCancelledRef.current) setManualLoad(null);
+  }
 
   // The catalog itself being empty (FAL returned nothing) is distinct from a
   // search/filter matching nothing — both show a message, but only the latter
@@ -174,8 +238,18 @@ export function ModelsBrowser({
       ) : (
         <>
           {visible.length > MAX_AUTO_PRICING_MODELS && (
-            <p className="text-xs text-muted-foreground">
-              Narrow your search or filters to see prices for these {visible.length} models.
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>Narrow your search or filters to see prices for these {visible.length} models, or</span>
+              <button
+                type="button"
+                onClick={handleLoadPricesAnyway}
+                disabled={manualLoad !== null}
+                className="underline disabled:no-underline"
+              >
+                {manualLoad
+                  ? `Loading prices… (${manualLoad.done}/${manualLoad.total})`
+                  : "load them anyway (slow)"}
+              </button>
             </p>
           )}
           <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">

@@ -5,7 +5,7 @@ import { approveModel, unapproveModel, listApprovedEndpointIds } from "@/lib/mod
 import { listModels, type Model } from "@/lib/fal-models";
 import { modelsForKind } from "@/lib/model-filter";
 import { fetchModelInputSchema, deriveInputHandles, type DeriveInputHandlesResult } from "@/lib/fal-schema";
-import { fetchModelPricing, fetchPricingBatch, type ModelPricing } from "@/lib/fal-pricing";
+import { fetchModelPricing, fetchPricingBatch, fetchPricingChunk, type ModelPricing } from "@/lib/fal-pricing";
 
 export async function approveModelAction(endpointId: string) {
   await approveModel(endpointId);
@@ -68,4 +68,22 @@ export async function fetchCatalogPricingAction(
 ): Promise<Record<string, ModelPricing>> {
   const pricingById = await fetchPricingBatch(endpointIds);
   return Object.fromEntries(pricingById);
+}
+
+export interface CatalogPricingChunkResult {
+  prices: Record<string, ModelPricing>;
+  /** Set when FAL rate-limited this chunk — its `Retry-After`, in seconds. */
+  retryAfterSeconds?: number;
+}
+
+// "Load prices anyway" (ADR-0010 revision): the /models catalog's manual,
+// deliberately-slow escape hatch for a result set too large to auto-price
+// (MAX_AUTO_PRICING_MODELS). ModelsBrowser calls this once per <=30-id
+// chunk, waiting out `retryAfterSeconds` between chunks when FAL rate-limits
+// one, instead of fetchCatalogPricingAction's silent best-effort.
+export async function fetchCatalogPricingChunkAction(
+  endpointIds: string[],
+): Promise<CatalogPricingChunkResult> {
+  const { prices, retryAfterSeconds } = await fetchPricingChunk(endpointIds);
+  return { prices: Object.fromEntries(prices), retryAfterSeconds };
 }

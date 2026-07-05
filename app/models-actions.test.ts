@@ -148,3 +148,38 @@ describe("models-actions — fetchCatalogPricingAction", () => {
     });
   });
 });
+
+// fetchCatalogPricingChunkAction (ADR-0010 revision): backs the /models
+// catalog's "load prices anyway" button — a thin server action over
+// fal-pricing.ts's fetchPricingChunk, surfacing Retry-After for a
+// deliberate, user-triggered retry loop.
+describe("models-actions — fetchCatalogPricingChunkAction", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns a plain object of resolved prices with no retryAfterSeconds on success", async () => {
+    vi.spyOn(falPricing, "fetchPricingChunk").mockResolvedValue({
+      prices: new Map([["fal-ai/flux/dev", { unitPrice: 0.04, unit: "images", currency: "USD" }]]),
+    });
+
+    const { fetchCatalogPricingChunkAction } = await import("./models-actions");
+    const result = await fetchCatalogPricingChunkAction(["fal-ai/flux/dev"]);
+
+    expect(result).toEqual({
+      prices: { "fal-ai/flux/dev": { unitPrice: 0.04, unit: "images", currency: "USD" } },
+    });
+  });
+
+  it("forwards retryAfterSeconds when the chunk was rate-limited", async () => {
+    vi.spyOn(falPricing, "fetchPricingChunk").mockResolvedValue({
+      prices: new Map(),
+      retryAfterSeconds: 37,
+    });
+
+    const { fetchCatalogPricingChunkAction } = await import("./models-actions");
+    const result = await fetchCatalogPricingChunkAction(["fal-ai/flux/dev"]);
+
+    expect(result).toEqual({ prices: {}, retryAfterSeconds: 37 });
+  });
+});

@@ -7,17 +7,20 @@ import type { Model } from "@/lib/fal-models";
 const approveModelAction = vi.fn();
 const unapproveModelAction = vi.fn();
 const fetchCatalogPricingAction = vi.fn();
+const fetchCatalogPricingChunkAction = vi.fn();
 
 vi.mock("@/app/models-actions", () => ({
   approveModelAction: (endpointId: string) => approveModelAction(endpointId),
   unapproveModelAction: (endpointId: string) => unapproveModelAction(endpointId),
   fetchCatalogPricingAction: (endpointIds: string[]) => fetchCatalogPricingAction(endpointIds),
+  fetchCatalogPricingChunkAction: (endpointIds: string[]) => fetchCatalogPricingChunkAction(endpointIds),
 }));
 
 beforeEach(() => {
   approveModelAction.mockReset();
   unapproveModelAction.mockReset();
   fetchCatalogPricingAction.mockReset().mockResolvedValue({});
+  fetchCatalogPricingChunkAction.mockReset().mockResolvedValue({ prices: {} });
 });
 
 function model(overrides: Partial<Model> = {}): Model {
@@ -248,7 +251,7 @@ describe("ModelsBrowser (search and filters)", () => {
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
   });
 
-  it("skips the pricing fetch (and shows a hint) when more models are visible than the auto-fetch cap", () => {
+  it("skips the pricing fetch (and shows a hint + button) when more models are visible than the auto-fetch cap", () => {
     const many = Array.from({ length: 31 }, (_, i) =>
       model({ endpointId: `fal-ai/model-${i}`, name: `Model ${i}` }),
     );
@@ -257,7 +260,48 @@ describe("ModelsBrowser (search and filters)", () => {
 
     expect(fetchCatalogPricingAction).not.toHaveBeenCalled();
     expect(screen.getByText(/narrow your search/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /load them anyway/i })).toBeInTheDocument();
   });
+
+  it("'load them anyway' fetches the first chunk immediately and shows progress", async () => {
+    const many = Array.from({ length: 31 }, (_, i) =>
+      model({ endpointId: `fal-ai/model-${i}`, name: `Model ${i}` }),
+    );
+    fetchCatalogPricingChunkAction.mockResolvedValueOnce({
+      prices: { "fal-ai/model-0": { unitPrice: 0.01, unit: "images", currency: "USD" } },
+    });
+
+    render(<ModelsBrowser models={many} />);
+    await userEvent.click(screen.getByRole("button", { name: /load them anyway/i }));
+
+    expect(await screen.findByText("$0.01 / image")).toBeInTheDocument();
+    expect(fetchCatalogPricingChunkAction).toHaveBeenCalledWith(
+      Array.from({ length: 30 }, (_, i) => `fal-ai/model-${i}`),
+    );
+    expect(screen.getByRole("button", { name: /loading prices.*1\/2/i })).toBeDisabled();
+  });
+
+  it("'load them anyway' works through every chunk, then reverts the button", async () => {
+    const many = Array.from({ length: 31 }, (_, i) =>
+      model({ endpointId: `fal-ai/model-${i}`, name: `Model ${i}` }),
+    );
+    fetchCatalogPricingChunkAction
+      .mockResolvedValueOnce({
+        prices: { "fal-ai/model-0": { unitPrice: 0.01, unit: "images", currency: "USD" } },
+      })
+      .mockResolvedValueOnce({
+        prices: { "fal-ai/model-30": { unitPrice: 0.02, unit: "images", currency: "USD" } },
+      });
+
+    render(<ModelsBrowser models={many} />);
+    await userEvent.click(screen.getByRole("button", { name: /load them anyway/i }));
+
+    expect(await screen.findByText("$0.01 / image")).toBeInTheDocument();
+    expect(await screen.findByText("$0.02 / image", {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(fetchCatalogPricingChunkAction).toHaveBeenCalledTimes(2);
+    expect(fetchCatalogPricingChunkAction).toHaveBeenLastCalledWith(["fal-ai/model-30"]);
+    expect(await screen.findByRole("button", { name: /^load them anyway/i })).not.toBeDisabled();
+  }, 10000);
 
   it("orders newest-added first by default and flips when sorted oldest", async () => {
     const old = model({ endpointId: "a", name: "Old Model", addedAt: "2025-01-01T00:00:00Z" });
