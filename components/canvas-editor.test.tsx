@@ -193,6 +193,113 @@ describe("CanvasEditor persistence", () => {
   });
 });
 
+describe("CanvasEditor running total of Actual Cost (issue #42)", () => {
+  it("shows the sum of Actual Cost across all nodes' History entries", () => {
+    render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 0, y: 0 },
+              data: {
+                prompt: "a cat",
+                history: {
+                  entries: [
+                    { id: "h1", prompt: "a cat", output: { kind: "image", url: "u1" }, actualCost: 0.1 },
+                    { id: "h2", prompt: "a cat", output: { kind: "image", url: "u2" }, actualCost: 0.2 },
+                  ],
+                  activeId: "h2",
+                },
+              },
+            },
+            {
+              id: "gen2",
+              type: "videoGeneration",
+              position: { x: 400, y: 0 },
+              data: {
+                prompt: "a dog",
+                history: {
+                  entries: [
+                    { id: "h3", prompt: "a dog", output: { kind: "video", url: "u3" }, actualCost: 0.05 },
+                  ],
+                  activeId: "h3",
+                },
+              },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    expect(screen.getByLabelText("Total cost")).toHaveTextContent("$0.35");
+  });
+
+  it("shows no total on a canvas with no costed History entries", () => {
+    render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "n1",
+              type: "staticTextReference",
+              position: { x: 0, y: 0 },
+              data: { text: "hi" },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Total cost")).not.toBeInTheDocument();
+  });
+
+  it("updates the total when a node with costed History is deleted", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 0, y: 0 },
+              data: {
+                prompt: "a cat",
+                history: {
+                  entries: [
+                    { id: "h1", prompt: "a cat", output: { kind: "image", url: "u1" }, actualCost: 0.1 },
+                  ],
+                  activeId: "h1",
+                },
+              },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    expect(screen.getByLabelText("Total cost")).toHaveTextContent("$0.10");
+
+    // Give React Flow a beat to finish its initial node measurement (see the
+    // drag-to-spawn tests' own onInit wait above) — without it the node is
+    // still `visibility: hidden` and its actions button isn't accessible yet.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const node = container.querySelector('.react-flow__node[data-id="gen1"]') as HTMLElement;
+    await user.click(within(node).getByRole("button", { name: "Node actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Total cost")).not.toBeInTheDocument();
+    });
+  });
+});
+
 describe("CanvasEditor header rename (issue #21)", () => {
   it("renames the canvas via the header: click, type, Enter persists and updates the header", async () => {
     const user = userEvent.setup();

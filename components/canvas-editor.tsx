@@ -42,6 +42,8 @@ import {
 } from "@/lib/connection-rules";
 import { resolveSpawnCandidates, type SpawnCandidate } from "@/lib/handle-spawn";
 import { firstCompatibleHandle } from "@/lib/edge-reconcile";
+import { totalActualCost } from "@/lib/canvas-cost";
+import { formatActualCost } from "@/lib/actual-cost";
 import type { Canvas } from "@/lib/canvas-repo";
 import type { ImageGenerationNodeData } from "@/components/nodes/image-generation-node";
 import type { VideoGenerationNodeData } from "@/components/nodes/video-generation-node";
@@ -444,6 +446,12 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
     });
   }
 
+  // Running total of Actual Cost (CONTEXT.md / issue #42): purely derived
+  // from the current `nodes` state on every render — never persisted as its
+  // own aggregate — so it updates live as generations complete, variants
+  // land, and nodes are deleted, with no extra bookkeeping.
+  const totalCost = useMemo(() => totalActualCost(nodes), [nodes]);
+
   const persist = useMemo(
     () =>
       debounce((graph: ReactFlowJsonObject) => {
@@ -527,6 +535,14 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
           </button>
         )}
         <div className="ml-auto flex items-center gap-2">
+          {totalCost !== undefined && (
+            <span
+              aria-label="Total cost"
+              className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+            >
+              Total cost: {formatActualCost(totalCost)}
+            </span>
+          )}
           <span className="text-xs text-muted-foreground">
             {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}
           </span>
