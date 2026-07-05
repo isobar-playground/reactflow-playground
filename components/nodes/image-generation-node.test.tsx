@@ -1820,3 +1820,95 @@ describe("ImageGenerationNode Estimated Price (issue #37)", () => {
     expect(screen.getByText("Est. ~$0.70")).toBeInTheDocument();
   });
 });
+
+// Connected media inputs (issue #40 / ADR-0009, PRD #35): the node's
+// snapshotted Model handles are paired with their currently-connected source
+// nodes and forwarded to runImageGeneration's `media` field, which
+// lib/generation-payload.ts maps into the FAL request body — the actual
+// handle->field mapping is covered there; this node's own tests only check
+// that it gathers and forwards the right connections.
+describe("ImageGenerationNode connected media inputs (issue #40)", () => {
+  const editModel: ImageGenerationNodeData["model"] = {
+    endpointId: "fal-ai/nano-banana-2/edit",
+    name: "Nano Banana 2 Edit",
+    category: "image-to-image",
+    handles: [{ handleId: "image_urls", label: "image_urls", dataType: "image", many: true }],
+    hasNegativePrompt: false,
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("forwards a Static Media Reference wired into a media handle as a media connection", async () => {
+    const run = vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/out.png",
+    });
+    const user = userEvent.setup();
+    renderInCanvas(
+      [
+        {
+          id: "media1",
+          type: "staticMediaReference",
+          position: { x: -300, y: 0 },
+          initialWidth: 200,
+          initialHeight: 200,
+          data: { asset: { url: "/uploads/cat.png", name: "cat.png", type: "image" } },
+        },
+        {
+          id: "gen1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "a cat", history: { entries: [], activeId: null }, model: editModel },
+        },
+      ],
+      [{ id: "e1", source: "media1", target: "gen1", targetHandle: "image_urls" }],
+    );
+
+    await user.click(within(document.querySelector('[data-node-id="gen1"]') as HTMLElement).getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          endpointId: "fal-ai/nano-banana-2/edit",
+          prompt: "a cat",
+          media: [
+            expect.objectContaining({
+              handle: expect.objectContaining({ handleId: "image_urls" }),
+              sources: [
+                expect.objectContaining({
+                  type: "staticMediaReference",
+                  data: { asset: { url: "/uploads/cat.png", name: "cat.png", type: "image" } },
+                }),
+              ],
+            }),
+          ],
+        }),
+        expect.anything(),
+      );
+    });
+  });
+
+  it("forwards an empty sources array for a media handle with nothing connected", async () => {
+    const run = vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/out.png",
+    });
+    const user = userEvent.setup();
+    renderNode({ prompt: "a cat", history: { entries: [], activeId: null }, model: editModel });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          media: [expect.objectContaining({ handle: expect.objectContaining({ handleId: "image_urls" }), sources: [] })],
+        }),
+        expect.anything(),
+      );
+    });
+  });
+});

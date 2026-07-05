@@ -10,19 +10,43 @@ import {
   submitGeneration,
   getGenerationStatus,
   getGenerationResult,
+  inlineLocalAssets,
   type PendingGeneration,
+  type LocalAssetRef,
 } from "@/lib/fal-generation";
 
-export type { PendingGeneration };
+export type { PendingGeneration, LocalAssetRef };
+
+// Connected media inputs (issue #40 / ADR-0009): the local-filesystem Asset
+// Library backend (ADR-0005) serves assets from a relative `/uploads/...`
+// path, which a plain server-side `fetch` can't resolve on its own — unlike
+// the Blob backend's already-absolute URLs, or an upstream Generation Node's
+// fal.media output (which never needs inlining at all — see
+// lib/generation-payload.ts). NEXT_PUBLIC_APP_URL/VERCEL_URL cover deployed
+// environments; local dev falls back to Next's own default port.
+function resolveAssetOrigin(): string {
+  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "http://localhost:3000";
+}
 
 // Submits a generation request to the selected Model's FAL queue endpoint.
-// The returned pending record (request id + status/response URLs, used
-// verbatim) is what the caller persists into the node's `data`.
+// `localAssetRefs` (issue #40) names which of `input`'s fields are local
+// Asset Library assets that need inlining as base64 data URIs before FAL can
+// ever see them (lib/fal-generation.ts's inlineLocalAssets) — omitted/empty
+// when the node has no connected local assets, in which case `input` is
+// submitted verbatim exactly as before. The returned pending record (request
+// id + status/response URLs, used verbatim) is what the caller persists
+// into the node's `data`.
 export async function submitGenerationAction(
   endpointId: string,
   input: Record<string, unknown>,
+  localAssetRefs: LocalAssetRef[] = [],
 ): Promise<PendingGeneration> {
-  return submitGeneration(endpointId, input);
+  const resolvedInput = await inlineLocalAssets(input, localAssetRefs, {
+    resolveUrl: (url) => (url.startsWith("/") ? `${resolveAssetOrigin()}${url}` : url),
+  });
+  return submitGeneration(endpointId, resolvedInput);
 }
 
 export type GenerationPollResult =

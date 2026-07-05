@@ -132,6 +132,68 @@ function extractMediaUrl(data: unknown): string | undefined {
   return undefined;
 }
 
+// A media field resolved to a local Asset Library asset (ADR-0005 — see
+// lib/generation-payload.ts, which produces these): its URL isn't reachable
+// by FAL, so it needs replacing with a base64 data URI before submission.
+export interface LocalAssetRef {
+  handleId: string;
+  /** Index into the array value, for a `many` handle; absent for a single
+   * value. */
+  index?: number;
+  url: string;
+}
+
+export interface InlineAssetsOptions extends FalFetchOptions {
+  /** Resolves a possibly-relative asset URL (e.g. the local-filesystem Asset
+   * Library backend's `/uploads/...` paths, ADR-0005) to one `fetch` can
+   * reach from the server. An already-absolute URL (the Blob backend, or
+   * any fal.media passthrough — which never reaches this function anyway,
+   * per lib/generation-payload.ts's local-vs-remote marking) is used as-is
+   * when this is omitted. */
+  resolveUrl?: (url: string) => string;
+}
+
+// Issue #40 / ADR-0009: "the submit server action inlines them as base64
+// data URIs before submitting." Fetches each local asset's raw bytes and
+// swaps its URL for a `data:` URI in a shallow copy of `body` — `body`
+// itself is never mutated. Only the local Asset Library ever reaches this
+// path; an upstream Generation Node's Active Output is already a public
+// fal.media URL and is never included in `localAssetRefs` (see
+// lib/generation-payload.ts's buildGenerationPayload).
+export async function inlineLocalAssets(
+  body: Record<string, unknown>,
+  localAssetRefs: LocalAssetRef[],
+  options: InlineAssetsOptions = {},
+): Promise<Record<string, unknown>> {
+  if (localAssetRefs.length === 0) return body;
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const resolveUrl = options.resolveUrl ?? ((url: string) => url);
+  const next = { ...body };
+
+  await Promise.all(
+    localAssetRefs.map(async (ref) => {
+      const response = await fetchImpl(resolveUrl(ref.url));
+      if (!response.ok) {
+        throw new Error(`Failed to fetch local asset for inlining (${response.status}): ${ref.url}`);
+      }
+      const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const dataUri = `data:${contentType};base64,${buffer.toString("base64")}`;
+
+      if (ref.index !== undefined) {
+        const values = [...(next[ref.handleId] as string[])];
+        values[ref.index] = dataUri;
+        next[ref.handleId] = values;
+      } else {
+        next[ref.handleId] = dataUri;
+      }
+    }),
+  );
+
+  return next;
+}
+
 // Fetches the queue's own `response_url` (used verbatim, per ADR-0009) once
 // status is COMPLETED, and extracts the first generated asset's URL —
 // image or video, whichever the Model's output shape contains.

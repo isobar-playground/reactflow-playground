@@ -1669,3 +1669,94 @@ describe("VideoGenerationNode resumes a pending generation on mount (issue #39)"
     expect(resume).not.toHaveBeenCalled();
   });
 });
+
+// Connected media inputs (issue #40 / ADR-0009, PRD #35): mirrors
+// components/nodes/image-generation-node.test.tsx's identical coverage —
+// this node's own tests only check that it gathers and forwards the right
+// connections; lib/generation-payload.ts's own tests cover the actual
+// handle->field mapping.
+describe("VideoGenerationNode connected media inputs (issue #40)", () => {
+  const imageToVideoModel: VideoGenerationNodeData["model"] = {
+    endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+    name: "Kling v3 Pro",
+    category: "image-to-video",
+    handles: [{ handleId: "startFrame", label: "startFrame", dataType: "image", many: false }],
+    hasNegativePrompt: false,
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("forwards a Static Media Reference wired into a media handle as a media connection", async () => {
+    const run = vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
+      kind: "video",
+      url: "https://fal.media/out.mp4",
+    });
+    const user = userEvent.setup();
+    renderInCanvas(
+      [
+        {
+          id: "media1",
+          type: "staticMediaReference",
+          position: { x: -300, y: 0 },
+          initialWidth: 200,
+          initialHeight: 200,
+          data: { asset: { url: "/uploads/frame.png", name: "frame.png", type: "image" } },
+        },
+        {
+          id: "gen1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "a car driving", history: { entries: [], activeId: null }, model: imageToVideoModel },
+        },
+      ],
+      [{ id: "e1", source: "media1", target: "gen1", targetHandle: "startFrame" }],
+    );
+
+    await user.click(within(document.querySelector('[data-node-id="gen1"]') as HTMLElement).getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+          prompt: "a car driving",
+          media: [
+            expect.objectContaining({
+              handle: expect.objectContaining({ handleId: "startFrame" }),
+              sources: [
+                expect.objectContaining({
+                  type: "staticMediaReference",
+                  data: { asset: { url: "/uploads/frame.png", name: "frame.png", type: "image" } },
+                }),
+              ],
+            }),
+          ],
+        }),
+        expect.anything(),
+      );
+    });
+  });
+
+  it("forwards an empty sources array for a media handle with nothing connected", async () => {
+    const run = vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
+      kind: "video",
+      url: "https://fal.media/out.mp4",
+    });
+    const user = userEvent.setup();
+    renderNode({ prompt: "a car driving", history: { entries: [], activeId: null }, model: imageToVideoModel });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          media: [expect.objectContaining({ handle: expect.objectContaining({ handleId: "startFrame" }), sources: [] })],
+        }),
+        expect.anything(),
+      );
+    });
+  });
+});

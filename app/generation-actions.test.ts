@@ -34,6 +34,75 @@ describe("submitGenerationAction", () => {
       responseUrl: "https://queue.fal.run/fal-ai/flux/requests/req-1",
     });
   });
+
+  // Connected media inputs (issue #40 / ADR-0009): a local Asset Library
+  // asset isn't a URL FAL can fetch, so the submit action inlines it as a
+  // base64 data URI (lib/fal-generation.ts's inlineLocalAssets) before
+  // submitting — proven here by asserting on the body FAL's queue endpoint
+  // actually received.
+  it("inlines a local asset ref into a base64 data URI before submitting to FAL", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const url = String(input);
+        calls.push({ url, init });
+        if (url.endsWith("/uploads/cat.png")) {
+          return new Response(new Uint8Array([1, 2, 3]), {
+            status: 200,
+            headers: { "content-type": "image/png" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            request_id: "req-1",
+            status_url: "https://queue.fal.run/fal-ai/flux/requests/req-1/status",
+            response_url: "https://queue.fal.run/fal-ai/flux/requests/req-1",
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    const { submitGenerationAction } = await import("./generation-actions");
+    await submitGenerationAction(
+      "fal-ai/flux/schnell",
+      { prompt: "a cat", image_url: "/uploads/cat.png" },
+      [{ handleId: "image_url", url: "/uploads/cat.png" }],
+    );
+
+    const submitCall = calls.find((call) => call.url === "https://queue.fal.run/fal-ai/flux/schnell");
+    const submittedBody = JSON.parse(String(submitCall?.init?.body));
+    expect(submittedBody.image_url).toBe(
+      `data:image/png;base64,${Buffer.from([1, 2, 3]).toString("base64")}`,
+    );
+  });
+
+  it("submits the body verbatim when no local asset refs are given (existing behavior unchanged)", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        calls.push({ url: String(input), init });
+        return new Response(
+          JSON.stringify({ request_id: "req-1", status_url: "s", response_url: "u" }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    const { submitGenerationAction } = await import("./generation-actions");
+    await submitGenerationAction("fal-ai/flux/schnell", {
+      prompt: "a cat",
+      image_url: "https://fal.media/upstream.png",
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+      prompt: "a cat",
+      image_url: "https://fal.media/upstream.png",
+    });
+  });
 });
 
 describe("pollGenerationAction", () => {

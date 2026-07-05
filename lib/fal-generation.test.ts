@@ -3,6 +3,7 @@ import {
   submitGeneration,
   getGenerationStatus,
   getGenerationResult,
+  inlineLocalAssets,
 } from "./fal-generation";
 
 // fal-generation (ADR-0009): the server-only queue-API wrapper. Tested with
@@ -167,5 +168,83 @@ describe("getGenerationResult", () => {
     );
 
     await expect(getGenerationResult("https://queue.fal.run/x", { fetchImpl })).rejects.toThrow(/500/);
+  });
+});
+
+// inlineLocalAssets (issue #40 / ADR-0009): assets from the local Asset
+// Library aren't URLs FAL can fetch, so the submit path fetches their bytes
+// itself and swaps in a base64 data URI — tested with an injectable fetch
+// serving canned bytes, same pattern as the rest of this module.
+describe("inlineLocalAssets", () => {
+  it("replaces a single-value field's URL with a base64 data URI fetched from it", async () => {
+    const { fetchImpl } = fakeFetch(() =>
+      new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png" } }),
+    );
+
+    const result = await inlineLocalAssets(
+      { prompt: "a cat", image_url: "/uploads/cat.png" },
+      [{ handleId: "image_url", url: "/uploads/cat.png" }],
+      { fetchImpl },
+    );
+
+    expect(result).toEqual({
+      prompt: "a cat",
+      image_url: `data:image/png;base64,${Buffer.from([1, 2, 3]).toString("base64")}`,
+    });
+  });
+
+  it("returns the body untouched when there are no local asset refs (no fetch call)", async () => {
+    const { fetchImpl, calls } = fakeFetch(() => new Response(null, { status: 200 }));
+
+    const result = await inlineLocalAssets({ prompt: "a cat" }, [], { fetchImpl });
+
+    expect(result).toEqual({ prompt: "a cat" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("inlines only the referenced index of a `many` field's array, leaving other entries (e.g. fal.media passthroughs) untouched", async () => {
+    const { fetchImpl } = fakeFetch(() =>
+      new Response(new Uint8Array([9]), { status: 200, headers: { "content-type": "image/jpeg" } }),
+    );
+
+    const result = await inlineLocalAssets(
+      { prompt: "a cat", image_urls: ["https://fal.media/first.png", "/uploads/second.png"] },
+      [{ handleId: "image_urls", index: 1, url: "/uploads/second.png" }],
+      { fetchImpl },
+    );
+
+    expect(result).toEqual({
+      prompt: "a cat",
+      image_urls: [
+        "https://fal.media/first.png",
+        `data:image/jpeg;base64,${Buffer.from([9]).toString("base64")}`,
+      ],
+    });
+  });
+
+  it("resolves a relative URL through the given resolveUrl before fetching", async () => {
+    const { fetchImpl, calls } = fakeFetch(() =>
+      new Response(new Uint8Array([1]), { status: 200, headers: { "content-type": "image/png" } }),
+    );
+
+    await inlineLocalAssets(
+      { prompt: "a cat", image_url: "/uploads/cat.png" },
+      [{ handleId: "image_url", url: "/uploads/cat.png" }],
+      { fetchImpl, resolveUrl: (url) => `http://localhost:3000${url}` },
+    );
+
+    expect(calls[0].url).toBe("http://localhost:3000/uploads/cat.png");
+  });
+
+  it("throws when fetching the local asset fails", async () => {
+    const { fetchImpl } = fakeFetch(() => new Response("nope", { status: 404 }));
+
+    await expect(
+      inlineLocalAssets(
+        { prompt: "a cat", image_url: "/uploads/missing.png" },
+        [{ handleId: "image_url", url: "/uploads/missing.png" }],
+        { fetchImpl },
+      ),
+    ).rejects.toThrow(/404/);
   });
 });

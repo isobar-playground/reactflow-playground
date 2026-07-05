@@ -28,6 +28,7 @@ import { cloneVariants } from "@/lib/variant-clone";
 import { approvedModelsForKind, fetchModelSchemaAction } from "@/app/models-actions";
 import type { Model } from "@/lib/fal-models";
 import type { ResolvedHandle } from "@/lib/fal-schema";
+import type { MediaHandleConnection } from "@/lib/generation-payload";
 import type { ModelPricing } from "@/lib/fal-pricing";
 import { estimatePrice, formatEstimatedPrice } from "@/lib/price-estimate";
 import { reconcileEdges, resolveEdgeDataTypeFromNodes } from "@/lib/edge-reconcile";
@@ -163,6 +164,35 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
     ? [{ handleId: "text", label: "text", dataType: "text", many: true }, ...selectedModel.handles]
     : [];
 
+  // Connected media inputs (issue #40 / ADR-0009, PRD #35): every media
+  // Input Handle's currently-connected source nodes, gathered once here (all
+  // target connections regardless of handle, then grouped by targetHandle)
+  // rather than one useNodeConnections call per handle — the number of media
+  // handles varies with the selected Model, and a variable-length hook loop
+  // would violate the Rules of Hooks. Handed to lib/real-generation.ts's
+  // `media` field, which lib/generation-payload.ts's pure buildGenerationPayload
+  // maps into the FAL request body (an array for a `many` handle, a single
+  // value otherwise; unconnected handles are simply omitted).
+  const allTargetConnections = useNodeConnections({ id, handleType: "target" });
+  const mediaSourceIdsByHandle = new Map<string, string[]>();
+  for (const connection of allTargetConnections) {
+    const handleId = connection.targetHandle;
+    if (!handleId || handleId === "text") continue;
+    const ids = mediaSourceIdsByHandle.get(handleId) ?? [];
+    ids.push(connection.source);
+    mediaSourceIdsByHandle.set(handleId, ids);
+  }
+  const uniqueMediaSourceIds = [...new Set([...mediaSourceIdsByHandle.values()].flat())];
+  const mediaSourceNodes = useNodesData(uniqueMediaSourceIds);
+  const mediaSourceNodesById = new Map(mediaSourceNodes.map((node) => [node.id, node]));
+  const mediaConnections: MediaHandleConnection[] = (selectedModel?.handles ?? []).map((handle) => ({
+    handle,
+    sources: (mediaSourceIdsByHandle.get(handle.handleId) ?? [])
+      .map((nodeId) => mediaSourceNodesById.get(nodeId))
+      .filter((node): node is NonNullable<typeof node> => node !== undefined)
+      .map((node) => ({ type: node.type, data: node.data })),
+  }));
+
   const { getNode, getEdges, setEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
   const { duplicate, remove } = useNodeActions(id);
 
@@ -248,12 +278,16 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
 
     const negativePrompt =
       selectedModel.hasNegativePrompt && data.negativePrompt ? data.negativePrompt : undefined;
+    // Each clone inherits the original's incoming reference edges verbatim
+    // (lib/variant-clone.ts), so its wired media inputs are the same
+    // `mediaConnections` this node itself just computed (issue #40).
     const generated = await Promise.all(
       clones.map(() =>
         runImageGeneration({
           endpointId: selectedModel.endpointId,
           prompt: resolvedPromptText,
           negativePrompt,
+          media: mediaConnections,
         }).catch(() => null),
       ),
     );
@@ -301,7 +335,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
       const negativePrompt =
         selectedModel.hasNegativePrompt && data.negativePrompt ? data.negativePrompt : undefined;
       const result = await runImageGeneration(
-        { endpointId: selectedModel.endpointId, prompt: resolvedPromptText, negativePrompt },
+        { endpointId: selectedModel.endpointId, prompt: resolvedPromptText, negativePrompt, media: mediaConnections },
         { onPending: (pending) => updateNodeData(id, { pendingGeneration: pending }) },
       );
       updateNodeData(id, {

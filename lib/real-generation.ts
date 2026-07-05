@@ -22,6 +22,7 @@ import {
   type PendingGeneration,
 } from "@/app/generation-actions";
 import type { ImagePlaceholderResult, VideoPlaceholderResult } from "./node-history";
+import { buildGenerationPayload, type MediaHandleConnection } from "./generation-payload";
 
 export interface RunGenerationInput {
   endpointId: string;
@@ -29,6 +30,13 @@ export interface RunGenerationInput {
   prompt: string;
   /** Only sent when the selected Model's schema has `negative_prompt`. */
   negativePrompt?: string;
+  /** The node's snapshotted, schema-derived Input Handles (ADR-0007/
+   * ADR-0008) paired with their currently-connected source nodes, in edge
+   * order (issue #40 / ADR-0009: "generation payloads grow from prompt-only
+   * to the node's full wired inputs"). Omitted/empty when the Model has no
+   * media handles, or none are wired — those handles are simply absent from
+   * the submitted body. */
+  media?: MediaHandleConnection[];
 }
 
 export type RunImageGenerationInput = RunGenerationInput;
@@ -53,19 +61,28 @@ function defaultWait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function buildRequestBody(input: RunGenerationInput): Record<string, unknown> {
-  const body: Record<string, unknown> = { prompt: input.prompt };
-  if (input.negativePrompt) {
-    body.negative_prompt = input.negativePrompt;
-  }
-  return body;
+// Submits `input` to FAL's queue via the server action (ADR-0009): the body
+// is built by the pure lib/generation-payload.ts module from the prompt/
+// negative-prompt plus this node's connected media handles (issue #40), and
+// any local Asset Library asset it found is forwarded as a localAssetRef so
+// the server action can inline it — the third argument is only ever
+// non-empty when at least one connected input is a local asset, keeping the
+// call shape unchanged for every Model with no media inputs wired.
+async function submit(input: RunGenerationInput): Promise<PendingGeneration> {
+  const { body, localAssetRefs } = buildGenerationPayload(
+    { prompt: input.prompt, negativePrompt: input.negativePrompt },
+    input.media ?? [],
+  );
+  return localAssetRefs.length > 0
+    ? submitGenerationAction(input.endpointId, body, localAssetRefs)
+    : submitGenerationAction(input.endpointId, body);
 }
 
 export async function runImageGeneration(
   input: RunImageGenerationInput,
   options: RunImageGenerationOptions = {},
 ): Promise<ImagePlaceholderResult> {
-  const pending = await submitGenerationAction(input.endpointId, buildRequestBody(input));
+  const pending = await submit(input);
   options.onPending?.(pending);
 
   return pollUntilSettled(pending, options, "image");
@@ -96,7 +113,7 @@ export async function runVideoGeneration(
   input: RunVideoGenerationInput,
   options: RunVideoGenerationOptions = {},
 ): Promise<VideoPlaceholderResult> {
-  const pending = await submitGenerationAction(input.endpointId, buildRequestBody(input));
+  const pending = await submit(input);
   options.onPending?.(pending);
 
   return pollUntilSettled(pending, options, "video");

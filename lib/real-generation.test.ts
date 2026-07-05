@@ -6,6 +6,8 @@ import {
   runVideoGeneration,
   resumeVideoGeneration,
 } from "./real-generation";
+import type { MediaHandleConnection } from "./generation-payload";
+import type { ResolvedHandle } from "./fal-schema";
 
 // real-generation: the node-facing call that submits via the queue-API
 // server action and polls the status action until FAL is done. Shared
@@ -103,6 +105,39 @@ describe("runImageGeneration", () => {
     await expect(
       runImageGeneration({ endpointId: "fal-ai/flux/schnell", prompt: "a red car" }),
     ).rejects.toThrow("moderation blocked the request");
+  });
+
+  // Connected media inputs (issue #40 / ADR-0009): the node's snapshotted
+  // Model handles + their currently-connected source nodes (lib/generation-payload.ts)
+  // are folded into the submitted body, and any local Asset Library asset is
+  // forwarded as a localAssetRef for the submit action to inline.
+  it("folds connected media handles into the submitted body and forwards local asset refs", async () => {
+    vi.spyOn(generationActions, "submitGenerationAction").mockResolvedValue(pending);
+    vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
+      status: "completed",
+      mediaUrl: "https://fal.media/out.png",
+    });
+
+    const imageUrlHandle: ResolvedHandle = {
+      handleId: "image_url",
+      label: "image_url",
+      dataType: "image",
+      many: false,
+    };
+    const media: MediaHandleConnection[] = [
+      {
+        handle: imageUrlHandle,
+        sources: [{ type: "staticMediaReference", data: { asset: { url: "/uploads/cat.png", type: "image" } } }],
+      },
+    ];
+
+    await runImageGeneration({ endpointId: "fal-ai/flux/schnell", prompt: "a red car", media });
+
+    expect(generationActions.submitGenerationAction).toHaveBeenCalledWith(
+      "fal-ai/flux/schnell",
+      { prompt: "a red car", image_url: "/uploads/cat.png" },
+      [{ handleId: "image_url", url: "/uploads/cat.png" }],
+    );
   });
 });
 
