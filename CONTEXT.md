@@ -71,8 +71,16 @@ What one generation really cost, as billed by FAL: the billable units FAL report
 _Avoid_: Price (that's the estimate), spend
 
 **Model Catalog**:
-The set of Models the app can show. Sourced live from FAL rather than stored by the app, and joined against the app's approvals for display.
+The set of Models the app can show. Sourced live from FAL rather than stored by the app, and joined against the app's approvals and (best-effort) Unit Prices for display.
 _Avoid_: Model list, registry
+
+**Family**:
+A grouping of Models that share a model line or brand — Kling, LTX, Nano Banana, Veo, Flux, Wan, and so on. A display-and-filter concept, not something FAL gives us: it is **derived from the `endpoint_id`** (the provider-stripped leading token, cut before the first version/digit) and then run through a small app-owned alias map that merges the variants FAL scatters (`ltx`, `ltx-video`, `ltxv` all become LTX; `kling-video`, `kling-image` become Kling). Deliberately **not** FAL's `group` metadata, which is version-fragmented and absent on many Models (see ADR-0010). The Family filter on the catalog only surfaces families with two or more loaded Models; the long tail of single-Model tokens has no explicit family and is reachable by text search only.
+_Avoid_: Group, provider, series, brand
+
+**Unit Price**:
+A Model's raw per-unit price as billed by FAL — a number plus its unit, one of images / megapixels / seconds (e.g. `$0.14 / second`). Shown on the catalog card as-is, so prices are comparable within a unit but not across units. Distinct from **Estimated Price** (a per-run projection on a Generation Node) and **Actual Cost** (what a finished run was billed): the Unit Price is the shared input both of those are computed from. Fetched best-effort in batches and cached with the catalog; a Model whose price doesn't resolve simply shows no price (see ADR-0010).
+_Avoid_: Price (that's the estimate), cost (that's the actual)
 
 **Approved Model**:
 A Model the app has marked as available for selection on the canvas — the only Model state the app owns (a set of `endpoint_id`s; shared, with no per-user scoping, like the Asset Library). Deliberately distinct from FAL's own `status: active` (FAL's lifecycle) and `is_favorited` (a per-FAL-account favourite).
