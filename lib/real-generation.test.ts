@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as generationActions from "@/app/generation-actions";
-import { runImageGeneration } from "./real-generation";
+import { runImageGeneration, resumeImageGeneration } from "./real-generation";
 
 // real-generation: the node-facing call that submits via the queue-API
 // server action and polls the status action until FAL is done.
@@ -96,5 +96,57 @@ describe("runImageGeneration", () => {
     await expect(
       runImageGeneration({ endpointId: "fal-ai/flux/schnell", prompt: "a red car" }),
     ).rejects.toThrow("moderation blocked the request");
+  });
+});
+
+// resumeImageGeneration (issue #38): resumes polling an already-submitted
+// pending record — e.g. one restored from node data after a page reload —
+// without re-submitting to FAL. Shares the same poll-until-settled loop as
+// runImageGeneration, just entered with a record instead of a fresh submit.
+describe("resumeImageGeneration", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const pending = {
+    requestId: "req-1",
+    statusUrl: "https://queue.fal.run/x/status",
+    responseUrl: "https://queue.fal.run/x",
+  };
+
+  it("polls the given pending record without submitting a new request, and resolves once completed", async () => {
+    const submit = vi.spyOn(generationActions, "submitGenerationAction");
+    vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
+      status: "completed",
+      imageUrl: "https://fal.media/out.png",
+    });
+
+    const result = await resumeImageGeneration(pending);
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(result).toEqual({ kind: "image", url: "https://fal.media/out.png" });
+  });
+
+  it("keeps polling (via the injectable wait) while still pending, then resolves", async () => {
+    const poll = vi
+      .spyOn(generationActions, "pollGenerationAction")
+      .mockResolvedValueOnce({ status: "pending" })
+      .mockResolvedValueOnce({ status: "completed", imageUrl: "https://fal.media/out.png" });
+    const wait = vi.fn().mockResolvedValue(undefined);
+
+    const result = await resumeImageGeneration(pending, { wait, pollIntervalMs: 500 });
+
+    expect(poll).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(500);
+    expect(result).toEqual({ kind: "image", url: "https://fal.media/out.png" });
+  });
+
+  it("throws when FAL no longer recognizes the resumed request (stale record)", async () => {
+    vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
+      status: "error",
+      message: "FAL queue status returned 404",
+    });
+
+    await expect(resumeImageGeneration(pending)).rejects.toThrow("FAL queue status returned 404");
   });
 });

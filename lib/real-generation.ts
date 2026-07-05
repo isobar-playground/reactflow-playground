@@ -51,6 +51,29 @@ export async function runImageGeneration(
   const pending = await submitGenerationAction(input.endpointId, body);
   options.onPending?.(pending);
 
+  return pollUntilSettled(pending, options);
+}
+
+// Resumes polling an already-submitted pending record (issue #38 / ADR-0009)
+// — typically one restored from a Generation Node's `data.pendingGeneration`
+// after a page reload — without submitting a fresh request to FAL (FAL bills
+// the run either way; re-submitting would pay for a second one). Shares the
+// exact poll-until-settled loop runImageGeneration uses after its own
+// submit, so a resumed run behaves identically to one that never reloaded:
+// it resolves to the finished output, or throws the same FAL error a fresh
+// run would (e.g. a stale record FAL no longer recognizes) rather than
+// polling forever.
+export async function resumeImageGeneration(
+  pending: PendingGeneration,
+  options: RunImageGenerationOptions = {},
+): Promise<ImagePlaceholderResult> {
+  return pollUntilSettled(pending, options);
+}
+
+async function pollUntilSettled(
+  pending: PendingGeneration,
+  options: RunImageGenerationOptions,
+): Promise<ImagePlaceholderResult> {
   const wait = options.wait ?? defaultWait;
   const intervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 

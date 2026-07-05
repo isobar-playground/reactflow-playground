@@ -1630,6 +1630,141 @@ describe("ImageGenerationNode real generation (issue #36)", () => {
   });
 });
 
+// Resuming a pending generation after reload (CONTEXT.md / ADR-0009, issue
+// #38): a Generation Node whose data still holds a pendingGeneration record
+// at mount time (written at submit time by issue #36, but never previously
+// resumed) must pick polling back up rather than leaving the node stuck
+// showing nothing, or losing track of a run FAL is billing regardless.
+describe("ImageGenerationNode resumes a pending generation on mount (issue #38)", () => {
+  const pending = {
+    requestId: "req-1",
+    statusUrl: "https://queue.fal.run/x/status",
+    responseUrl: "https://queue.fal.run/x",
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the in-progress state immediately, then lands the result in History and clears the pending record", async () => {
+    let resolveResume!: (result: { kind: "image"; url: string }) => void;
+    vi.spyOn(realGeneration, "resumeImageGeneration").mockReturnValue(
+      new Promise((resolve) => {
+        resolveResume = resolve;
+      }),
+    );
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: {
+            prompt: "a cat",
+            history: { entries: [], activeId: null },
+            model: testModel,
+            pendingGeneration: pending,
+          },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    expect(realGeneration.resumeImageGeneration).toHaveBeenCalledWith(pending);
+    expect(screen.getAllByText(/generating/i).length).toBeGreaterThan(0);
+
+    resolveResume({ kind: "image", url: "https://fal.media/resumed.png" });
+
+    await screen.findByRole("img", { name: /output/i });
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
+      expect(data.history.entries).toHaveLength(1);
+      expect(data.history.entries[0].output.url).toBe("https://fal.media/resumed.png");
+      expect(data.pendingGeneration).toBeNull();
+    });
+  });
+
+  it("clears the pending record and shows the node's normal error state when FAL no longer recognizes the request", async () => {
+    vi.spyOn(realGeneration, "resumeImageGeneration").mockRejectedValue(
+      new Error("FAL queue status returned 404"),
+    );
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: {
+            prompt: "a cat",
+            history: { entries: [], activeId: null },
+            model: testModel,
+            pendingGeneration: pending,
+          },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/404/);
+    expect(screen.queryByText(/generating/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate" })).toBeInTheDocument();
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
+      expect(data.pendingGeneration).toBeNull();
+      expect(data.history.entries).toHaveLength(0);
+    });
+    expect(realGeneration.resumeImageGeneration).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call resumeImageGeneration when the node has no pending record", () => {
+    const resume = vi.spyOn(realGeneration, "resumeImageGeneration");
+    renderNode({ prompt: "a cat", history: { entries: [], activeId: null }, model: testModel });
+
+    expect(resume).not.toHaveBeenCalled();
+  });
+});
+
 // Estimated Price (CONTEXT.md / ADR-0009, issue #37): shown next to Generate
 // once the selected Model has a snapshotted pricing entry — unit price ×
 // naively estimated units × variant count. Never a quote.

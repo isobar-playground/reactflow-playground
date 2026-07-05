@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Position,
@@ -14,7 +14,7 @@ import {
 import { HandleBadge } from "@/components/nodes/handle-badge";
 import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
 import { useNodeActions } from "@/components/nodes/use-node-actions";
-import { runImageGeneration } from "@/lib/real-generation";
+import { runImageGeneration, resumeImageGeneration } from "@/lib/real-generation";
 import type { PendingGeneration } from "@/app/generation-actions";
 import {
   appendEntry,
@@ -60,9 +60,9 @@ export type ImageGenerationNodeData = {
   negativePrompt?: string;
   // The in-flight FAL queue request (ADR-0009): request id + the status/
   // response URLs returned verbatim by the submit call. Persisted into
-  // `data` so a reload can resume polling it (issue #38 wires the actual
-  // resumption; this issue only needs the record to land here). Cleared
-  // once the generation finishes, whether it succeeds or errors.
+  // `data` so a reload can resume polling it (issue #38 — see the mount
+  // effect below). Cleared once the generation finishes, whether it
+  // succeeds or errors.
   pendingGeneration?: PendingGeneration | null;
 };
 
@@ -178,6 +178,48 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   useEffect(() => {
     updateNodeInternals(id);
   }, [selectedModel?.endpointId, inputHandleLayout.length, id, updateNodeInternals]);
+
+  // Resume a pending generation after reload (CONTEXT.md / ADR-0009, issue
+  // #38): data.pendingGeneration (written at submit time, issue #36) surviving
+  // to mount means FAL is still running — or has already finished — a run
+  // this component lost track of client-side. FAL bills it either way, so on
+  // mount this resumes polling that exact record (never re-submits) instead
+  // of leaving the node stuck showing nothing. Success lands the output in
+  // History exactly like a fresh Generate; any failure — including FAL no
+  // longer recognizing a stale record — surfaces as the node's normal error
+  // state rather than polling forever. Either way the record is cleared from
+  // data once the run settles.
+  //
+  // Guarded by a ref (rather than skipping via the effect's own cleanup) so
+  // that clearing pendingGeneration from *this same* resumption — which
+  // re-runs the effect, since it's keyed on data.pendingGeneration below —
+  // doesn't race its own in-flight promise chain: a cleanup-based `cancelled`
+  // flag would flip true the instant the success/failure handler nulls out
+  // pendingGeneration, before the chain's own `finally` has run, silently
+  // leaving isGenerating stuck true.
+  const resumedRequestIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const pending = data.pendingGeneration;
+    if (!pending || resumedRequestIds.current.has(pending.requestId)) return;
+    resumedRequestIds.current.add(pending.requestId);
+    setIsGenerating(true);
+    setGenerationError(null);
+    resumeImageGeneration(pending)
+      .then((result) => {
+        updateNodeData(id, {
+          history: appendEntry(history, { id: crypto.randomUUID(), prompt, output: result }),
+          pendingGeneration: null,
+        });
+      })
+      .catch((error) => {
+        setGenerationError(error instanceof Error ? error.message : "Generation failed");
+        updateNodeData(id, { pendingGeneration: null });
+      })
+      .finally(() => {
+        setIsGenerating(false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.pendingGeneration]);
 
   // Variant cloning (CONTEXT.md / issue #12): when the counter is above one,
   // Generate adds (count - 1) sibling clones beside this node instead of
