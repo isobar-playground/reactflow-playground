@@ -14,7 +14,8 @@ import {
 import { HandleBadge } from "@/components/nodes/handle-badge";
 import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
 import { useNodeActions } from "@/components/nodes/use-node-actions";
-import { generateImagePlaceholder } from "@/lib/generation-mock";
+import { runImageGeneration } from "@/lib/real-generation";
+import type { PendingGeneration } from "@/app/generation-actions";
 import {
   appendEntry,
   setActiveEntry,
@@ -48,6 +49,12 @@ export type ImageGenerationNodeData = {
   history: NodeHistory;
   model?: SelectedModel | null;
   negativePrompt?: string;
+  // The in-flight FAL queue request (ADR-0009): request id + the status/
+  // response URLs returned verbatim by the submit call. Persisted into
+  // `data` so a reload can resume polling it (issue #38 wires the actual
+  // resumption; this issue only needs the record to land here). Cleared
+  // once the generation finishes, whether it succeeds or errors.
+  pendingGeneration?: PendingGeneration | null;
 };
 
 export type ImageGenerationNodeType = Node<ImageGenerationNodeData, "imageGeneration">;
@@ -69,6 +76,10 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   const prompt = data.prompt;
   const history = data.history;
   const [isGenerating, setIsGenerating] = useState(false);
+  // FAL failure (CONTEXT.md / ADR-0009): any error from the real generation
+  // surfaces as a message in the node and adds no History entry. Transient
+  // UI state, like isGenerating (issue #16) — not persisted to data.
+  const [generationError, setGenerationError] = useState<string | null>(null);
   // Variant counter (CONTEXT.md / issue #12): above one, Generate clones this
   // node into that many independent nodes instead of appending to its own
   // History. Resets to 1 after cloning. Kept as the raw input string (rather
@@ -158,7 +169,12 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   // ADR-0002: getNode(id) already returns the live `data.prompt` — the
   // prompt field writes through on every keystroke — so no manual merge of
   // the local prompt into the cloned node's data is needed here.
+  // Each clone runs its own independent real FAL submission (CONTEXT.md /
+  // ADR-0009's Variant / Clone) — never a shared or copied result. A clone
+  // whose generation errors gets no History entry (CONTEXT.md), same as the
+  // single-generation path below, but doesn't block its siblings.
   async function handleGenerateVariants(count: number) {
+    if (!selectedModel) return;
     setIsGenerating(true);
     const node = getNode(id);
     if (!node) {
@@ -167,18 +183,33 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
     }
     const { nodes: clones, edges: clonedEdges } = cloneVariants(node, getEdges(), count - 1);
 
-    const generated = await Promise.all(clones.map(() => generateImagePlaceholder()));
-    const clonesWithOutput = clones.map((clone, index) => ({
-      ...clone,
-      data: {
-        ...clone.data,
-        history: appendEntry(clone.data.history as NodeHistory, {
-          id: crypto.randomUUID(),
-          prompt,
-          output: generated[index],
-        }),
-      },
-    }));
+    const negativePrompt =
+      selectedModel.hasNegativePrompt && data.negativePrompt ? data.negativePrompt : undefined;
+    const generated = await Promise.all(
+      clones.map(() =>
+        runImageGeneration({
+          endpointId: selectedModel.endpointId,
+          prompt: resolvedPromptText,
+          negativePrompt,
+        }).catch(() => null),
+      ),
+    );
+    const clonesWithOutput = clones.map((clone, index) => {
+      const result = generated[index];
+      return {
+        ...clone,
+        data: {
+          ...clone.data,
+          history: result
+            ? appendEntry(clone.data.history as NodeHistory, {
+                id: crypto.randomUUID(),
+                prompt,
+                output: result,
+              })
+            : clone.data.history,
+        },
+      };
+    });
 
     addNodes(clonesWithOutput);
     addEdges(clonedEdges);
@@ -186,21 +217,40 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
     setIsGenerating(false);
   }
 
-  // Every Generate/Regenerate appends a new History entry — even with an
-  // unchanged prompt — and that entry becomes the Active Output (CONTEXT.md).
-  // ADR-0002 / issue #16: written through to data.history so it survives
-  // reload and stays visible to downstream consumers of the Active Output.
+  // Every Generate/Regenerate submits a real request to the selected Model's
+  // FAL queue endpoint (CONTEXT.md / ADR-0009), sending the Resolved Prompt
+  // as `prompt` and the negative-prompt config field when the Model supports
+  // it. The returned pending record is written through to data.pending
+  // Generation as soon as FAL accepts the submission (ADR-0009: enables
+  // resuming polling after a reload, wired separately in issue #38) and
+  // cleared once the run settles. On success, a new History entry becomes
+  // the Active Output (ADR-0002 / issue #16); on any FAL failure, an error
+  // message is shown instead and no History entry is added.
   async function handleGenerate() {
     if (variantCount > 1) {
       await handleGenerateVariants(variantCount);
       return;
     }
+    if (!selectedModel) return;
     setIsGenerating(true);
-    const result = await generateImagePlaceholder();
-    updateNodeData(id, {
-      history: appendEntry(history, { id: crypto.randomUUID(), prompt, output: result }),
-    });
-    setIsGenerating(false);
+    setGenerationError(null);
+    try {
+      const negativePrompt =
+        selectedModel.hasNegativePrompt && data.negativePrompt ? data.negativePrompt : undefined;
+      const result = await runImageGeneration(
+        { endpointId: selectedModel.endpointId, prompt: resolvedPromptText, negativePrompt },
+        { onPending: (pending) => updateNodeData(id, { pendingGeneration: pending }) },
+      );
+      updateNodeData(id, {
+        history: appendEntry(history, { id: crypto.randomUUID(), prompt, output: result }),
+        pendingGeneration: null,
+      });
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : "Generation failed");
+      updateNodeData(id, { pendingGeneration: null });
+    } finally {
+      setIsGenerating(false);
+    }
   }
 
   // Selecting a History thumbnail sets the Active Output and restores that
@@ -381,10 +431,18 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         <p className="mb-3 text-xs text-muted-foreground">Select a model to configure this node.</p>
       )}
 
+      {/* FAL failure (CONTEXT.md / ADR-0009): shown instead of a History
+          entry — no entry is ever added for a failed generation. */}
+      {generationError && (
+        <p role="alert" className="mb-3 text-xs text-destructive">
+          {generationError}
+        </p>
+      )}
+
       <button
         type="button"
         onClick={handleGenerate}
-        disabled={isGenerating}
+        disabled={isGenerating || !selectedModel}
         className="nodrag w-full rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
       >
         {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}

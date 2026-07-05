@@ -10,7 +10,7 @@ import {
   type Edge,
   type Node,
 } from "@xyflow/react";
-import * as generationMock from "@/lib/generation-mock";
+import * as realGeneration from "@/lib/real-generation";
 import * as modelsActions from "@/app/models-actions";
 import * as falSchema from "@/lib/fal-schema";
 import { ImageGenerationNode, type ImageGenerationNodeData } from "./image-generation-node";
@@ -32,6 +32,17 @@ const nodeTypes = {
   imageGeneration: ImageGenerationNode,
   staticTextReference: StaticTextReferenceNode,
   staticMediaReference: StaticMediaReferenceNode,
+};
+
+// A selected Model (CONTEXT.md / ADR-0009): Generate is disabled without one
+// (issue #36), so every test that actually clicks Generate/Regenerate needs
+// one in its node data — only the "no Model selected yet" tests omit it.
+const testModel: ImageGenerationNodeData["model"] = {
+  endpointId: "fal-ai/flux/dev",
+  name: "FLUX.1 [dev]",
+  category: "text-to-image",
+  handles: [],
+  hasNegativePrompt: false,
 };
 
 // Node data write-through (ADR-0002) only round-trips back into a controlled
@@ -113,14 +124,14 @@ describe("ImageGenerationNode generation", () => {
   });
 
   it("shows a loading state then the placeholder image after clicking Generate", async () => {
-    let resolveGeneration!: (result: generationMock.ImagePlaceholderResult) => void;
-    vi.spyOn(generationMock, "generateImagePlaceholder").mockReturnValue(
+    let resolveGeneration!: (result: { kind: "image"; url: string }) => void;
+    vi.spyOn(realGeneration, "runImageGeneration").mockReturnValue(
       new Promise((resolve) => {
         resolveGeneration = resolve;
       }),
     );
     const user = userEvent.setup();
-    renderNode();
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
@@ -135,12 +146,12 @@ describe("ImageGenerationNode generation", () => {
   });
 
   it("changes the button label to Regenerate after the first output exists", async () => {
-    vi.spyOn(generationMock, "generateImagePlaceholder").mockResolvedValue({
+    vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
       kind: "image",
       url: "https://picsum.photos/seed/abc/768/768",
     });
     const user = userEvent.setup();
-    renderNode();
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
@@ -154,12 +165,12 @@ describe("ImageGenerationNode history carousel", () => {
   });
 
   it("shows no carousel after the first generation", async () => {
-    vi.spyOn(generationMock, "generateImagePlaceholder").mockResolvedValue({
+    vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
       kind: "image",
       url: "https://picsum.photos/seed/a/768/768",
     });
     const user = userEvent.setup();
-    renderNode();
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
     await screen.findByRole("img", { name: /output/i });
@@ -168,11 +179,11 @@ describe("ImageGenerationNode history carousel", () => {
   });
 
   it("reveals a carousel with two thumbnails after the second generation", async () => {
-    vi.spyOn(generationMock, "generateImagePlaceholder")
+    vi.spyOn(realGeneration, "runImageGeneration")
       .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/a/768/768" })
       .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/b/768/768" });
     const user = userEvent.setup();
-    renderNode();
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
     await screen.findByRole("img", { name: /output/i });
@@ -190,11 +201,11 @@ describe("ImageGenerationNode history carousel", () => {
 
   it("clicking an older thumbnail sets it as the active output and restores its prompt, without regenerating", async () => {
     const generate = vi
-      .spyOn(generationMock, "generateImagePlaceholder")
+      .spyOn(realGeneration, "runImageGeneration")
       .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/a/768/768" })
       .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/b/768/768" });
     const user = userEvent.setup();
-    renderNode();
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
     const promptField = screen.getByPlaceholderText(/prompt/i);
     await user.type(promptField, "first prompt");
@@ -223,12 +234,12 @@ describe("ImageGenerationNode history carousel", () => {
   });
 
   it("has no length limit on history entries", async () => {
-    const generate = vi.spyOn(generationMock, "generateImagePlaceholder");
+    const generate = vi.spyOn(realGeneration, "runImageGeneration");
     for (let i = 0; i < 5; i++) {
       generate.mockResolvedValueOnce({ kind: "image", url: `https://picsum.photos/seed/${i}/768/768` });
     }
     const user = userEvent.setup();
-    renderNode();
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
     await screen.findByRole("img", { name: /output/i });
@@ -308,7 +319,7 @@ describe("ImageGenerationNode persistence", () => {
   // `data.history`, not local component state, or they vanish on reload.
   // Verified via getNode(id), not the DOM alone.
   it("writes a generated History entry through to node data", async () => {
-    vi.spyOn(generationMock, "generateImagePlaceholder").mockResolvedValue({
+    vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
       kind: "image",
       url: "https://picsum.photos/seed/abc/768/768",
     });
@@ -323,7 +334,7 @@ describe("ImageGenerationNode persistence", () => {
           position: { x: 0, y: 0 },
           initialWidth: 400,
           initialHeight: 500,
-          data: { prompt: "a cat", history: { entries: [], activeId: null } },
+          data: { prompt: "a cat", history: { entries: [], activeId: null }, model: testModel },
         },
       ]);
       const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
@@ -357,7 +368,7 @@ describe("ImageGenerationNode persistence", () => {
   });
 
   it("writes the restored prompt and activeId through to node data when selecting an older History entry", async () => {
-    vi.spyOn(generationMock, "generateImagePlaceholder")
+    vi.spyOn(realGeneration, "runImageGeneration")
       .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/a/768/768" })
       .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/b/768/768" });
     const user = userEvent.setup();
@@ -371,7 +382,7 @@ describe("ImageGenerationNode persistence", () => {
           position: { x: 0, y: 0 },
           initialWidth: 400,
           initialHeight: 500,
-          data: { prompt: "", history: { entries: [], activeId: null } },
+          data: { prompt: "", history: { entries: [], activeId: null }, model: testModel },
         },
       ]);
       const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
@@ -511,7 +522,7 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
 
   it("clones (count - 1) siblings beside the node when the counter is above one and Generate is clicked", async () => {
     const generate = vi
-      .spyOn(generationMock, "generateImagePlaceholder")
+      .spyOn(realGeneration, "runImageGeneration")
       .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c1/768/768" })
       .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c2/768/768" });
     const user = userEvent.setup();
@@ -522,7 +533,7 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
         position: { x: 0, y: 0 },
         initialWidth: 400,
         initialHeight: 500,
-        data: { prompt: "", history: { entries: [], activeId: null } },
+        data: { prompt: "", history: { entries: [], activeId: null }, model: testModel },
       },
     ]);
 
@@ -551,12 +562,12 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
   });
 
   it("resets the variant counter to 1 after cloning", async () => {
-    vi.spyOn(generationMock, "generateImagePlaceholder").mockResolvedValue({
+    vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
       kind: "image",
       url: "https://picsum.photos/seed/c1/768/768",
     });
     const user = userEvent.setup();
-    renderNode();
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
     const counter = screen.getByRole("spinbutton", { name: /variant/i });
     await user.clear(counter);
@@ -569,12 +580,12 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
   });
 
   it("behaves exactly as a normal Generate when the counter is left at 1 (no cloning)", async () => {
-    vi.spyOn(generationMock, "generateImagePlaceholder").mockResolvedValue({
+    vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
       kind: "image",
       url: "https://picsum.photos/seed/solo/768/768",
     });
     const user = userEvent.setup();
-    renderNode();
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
@@ -584,7 +595,7 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
   });
 
   it("wires each clone to the original's incoming Static Text Reference, without duplicating any outgoing edge", async () => {
-    vi.spyOn(generationMock, "generateImagePlaceholder").mockResolvedValue({
+    vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
       kind: "image",
       url: "https://picsum.photos/seed/c1/768/768",
     });
@@ -606,7 +617,7 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
           position: { x: 0, y: 0 },
           initialWidth: 400,
           initialHeight: 500,
-          data: { prompt: "", history: { entries: [], activeId: null } },
+          data: { prompt: "", history: { entries: [], activeId: null }, model: testModel },
         },
         {
           id: "downstream",
@@ -881,7 +892,7 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
   });
 
   it("preserves the selected Model when the node is cloned as a Variant", async () => {
-    vi.spyOn(generationMock, "generateImagePlaceholder").mockResolvedValue({
+    vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
       kind: "image",
       url: "https://picsum.photos/seed/c1/768/768",
     });
@@ -1358,5 +1369,253 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
     const resolvedPromptBlock = resolvedPromptHeading.parentElement as HTMLElement;
     expect(within(resolvedPromptBlock).getByText("a cat")).toBeInTheDocument();
     expect(within(resolvedPromptBlock).queryByText(/blurry/i)).not.toBeInTheDocument();
+  });
+});
+
+// Real FAL generation via the queue API (CONTEXT.md / ADR-0009, issue #36).
+// lib/real-generation.ts is mocked here exactly like the old generation-mock
+// module was — these tests only care about the node's own behavior (what it
+// sends, what it persists, how it reacts to success/failure), not
+// lib/real-generation's or the server actions' internals (covered by their
+// own unit tests).
+describe("ImageGenerationNode real generation (issue #36)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("disables Generate when no Model is selected", () => {
+    renderNode();
+
+    expect(screen.getByRole("button", { name: "Generate" })).toBeDisabled();
+  });
+
+  it("enables Generate once a Model is selected", () => {
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
+
+    expect(screen.getByRole("button", { name: "Generate" })).toBeEnabled();
+  });
+
+  it("submits the Resolved Prompt as `prompt`, and negative_prompt when the Model supports it", async () => {
+    const run = vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/out.png",
+    });
+    const user = userEvent.setup();
+    renderInCanvas([
+      {
+        id: "ref1",
+        type: "staticTextReference",
+        position: { x: -300, y: 0 },
+        initialWidth: 200,
+        initialHeight: 100,
+        data: { text: "a red car" },
+      },
+      {
+        id: "gen1",
+        type: "imageGeneration",
+        position: { x: 0, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: {
+          prompt: "in a driveway",
+          history: { entries: [], activeId: null },
+          model: { ...testModel, hasNegativePrompt: true },
+          negativePrompt: "blurry, low quality",
+        },
+      },
+    ], [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }]);
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          endpointId: "fal-ai/flux/dev",
+          prompt: "a red car in a driveway",
+          negativePrompt: "blurry, low quality",
+        }),
+        expect.anything(),
+      );
+    });
+  });
+
+  it("omits negativePrompt from the call when the Model's schema has no negative_prompt", async () => {
+    const run = vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/out.png",
+    });
+    const user = userEvent.setup();
+    renderNode({ prompt: "a cat", history: { entries: [], activeId: null }, model: testModel });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({ endpointId: "fal-ai/flux/dev", prompt: "a cat", negativePrompt: undefined }),
+        expect.anything(),
+      );
+    });
+  });
+
+  it("writes the pending generation record into node data once FAL accepts the request, and clears it once it completes", async () => {
+    const pending = {
+      requestId: "req-1",
+      statusUrl: "https://queue.fal.run/x/status",
+      responseUrl: "https://queue.fal.run/x",
+    };
+    let resolveGeneration!: (result: { kind: "image"; url: string }) => void;
+    vi.spyOn(realGeneration, "runImageGeneration").mockImplementation(async (_input, options) => {
+      options?.onPending?.(pending);
+      return new Promise((resolve) => {
+        resolveGeneration = resolve;
+      });
+    });
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "a cat", history: { entries: [], activeId: null }, model: testModel },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
+      expect(data.pendingGeneration).toEqual(pending);
+    });
+
+    resolveGeneration({ kind: "image", url: "https://fal.media/out.png" });
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
+      expect(data.history.entries).toHaveLength(1);
+      expect(data.pendingGeneration).toBeNull();
+    });
+  });
+
+  it("shows an error message and adds no History entry when the FAL generation fails", async () => {
+    vi.spyOn(realGeneration, "runImageGeneration").mockRejectedValue(
+      new Error("FAL queue submit returned 422 for fal-ai/flux/dev"),
+    );
+    const user = userEvent.setup();
+    renderNode({ prompt: "a cat", history: { entries: [], activeId: null }, model: testModel });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/422/);
+    expect(screen.queryByRole("img", { name: /output/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate" })).toBeInTheDocument();
+  });
+
+  it("clears a previous error once a subsequent Generate succeeds", async () => {
+    const run = vi
+      .spyOn(realGeneration, "runImageGeneration")
+      .mockRejectedValueOnce(new Error("moderation blocked the request"))
+      .mockResolvedValueOnce({ kind: "image", url: "https://fal.media/out.png" });
+    const user = userEvent.setup();
+    renderNode({ prompt: "a cat", history: { entries: [], activeId: null }, model: testModel });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await screen.findByRole("alert");
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+    expect(await screen.findByRole("img", { name: /output/i })).toBeInTheDocument();
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs one independent real generation per clone when generating variants", async () => {
+    const run = vi
+      .spyOn(realGeneration, "runImageGeneration")
+      .mockResolvedValueOnce({ kind: "image", url: "https://fal.media/c1.png" })
+      .mockResolvedValueOnce({ kind: "image", url: "https://fal.media/c2.png" });
+    const user = userEvent.setup();
+    renderInCanvas([
+      {
+        id: "n1",
+        type: "imageGeneration",
+        position: { x: 0, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: { prompt: "a cat", history: { entries: [], activeId: null }, model: testModel },
+      },
+    ]);
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "3");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledTimes(2);
+    });
+    expect(run).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ endpointId: "fal-ai/flux/dev", prompt: "a cat" }),
+    );
+    expect(run).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ endpointId: "fal-ai/flux/dev", prompt: "a cat" }),
+    );
+  });
+
+  it("adds no History entry for a clone whose generation fails, while its sibling still gets one", async () => {
+    vi.spyOn(realGeneration, "runImageGeneration")
+      .mockResolvedValueOnce({ kind: "image", url: "https://fal.media/c1.png" })
+      .mockRejectedValueOnce(new Error("FAL error"));
+    const user = userEvent.setup();
+    renderInCanvas([
+      {
+        id: "n1",
+        type: "imageGeneration",
+        position: { x: 0, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: { prompt: "a cat", history: { entries: [], activeId: null }, model: testModel },
+      },
+    ]);
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "3");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(3);
+    });
+    // Only one clone got a real output; the other's failed generation added
+    // no History entry, so it shows no output image at all.
+    await waitFor(() => {
+      expect(screen.getAllByRole("img", { name: "Generation output" })).toHaveLength(1);
+    });
   });
 });
