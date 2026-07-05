@@ -227,6 +227,22 @@ describe("ModelsBrowser (search and filters)", () => {
     expect(screen.getByText("One Off Model")).toBeInTheDocument();
   });
 
+  it("shows a Model's Unit Price on its card when present", () => {
+    const priced = model({
+      pricing: { unitPrice: 0.14, unit: "seconds", currency: "USD" },
+    });
+
+    render(<ModelsBrowser models={[priced]} />);
+
+    expect(screen.getByText("$0.14 / second")).toBeInTheDocument();
+  });
+
+  it("shows no Unit Price on a Model's card when pricing is absent", () => {
+    render(<ModelsBrowser models={[model({ pricing: undefined })]} />);
+
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
+  });
+
   it("orders newest-added first by default and flips when sorted oldest", async () => {
     const old = model({ endpointId: "a", name: "Old Model", addedAt: "2025-01-01T00:00:00Z" });
     const recent = model({ endpointId: "b", name: "Recent Model", addedAt: "2026-06-01T00:00:00Z" });

@@ -6,6 +6,17 @@ import {
   type Model,
 } from "./fal-models";
 
+// Fake pricing responses served from `FAL_PRICING_URL`, keyed by whether the
+// URL contains "pricing" — distinguishes pricing calls from catalog calls
+// sharing the same fakeFetch/fetchImpl.
+function fakePricingResponse(entries: Array<{ endpoint_id: string; unit_price: number; unit: string; currency: string }>) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ prices: entries }),
+  } as Response;
+}
+
 // A fake FAL entry as returned by GET /v1/models.
 function falEntry(
   overrides: { endpoint_id?: string; metadata?: Record<string, unknown> } = {},
@@ -240,5 +251,77 @@ describe("fal-models catalog client", () => {
     await listModels({ fetchImpl });
 
     expect(calls.length).toBeGreaterThan(callsAfterFirst);
+  });
+});
+
+// Unit Price join (issue #45 / ADR-0010): listModels() best-effort joins
+// pricing into the assembled catalog. The pricing fetch shares the injected
+// fetchImpl but hits a different URL (no `category` param), so these tests
+// route on that to serve catalog vs. pricing responses from one fake.
+describe("fal-models catalog client (Unit Price join)", () => {
+  beforeEach(() => {
+    delete process.env.FAL_KEY;
+    resetFalModelsForTests();
+  });
+
+  afterEach(() => {
+    resetFalModelsForTests();
+  });
+
+  function fakeFetchWithPricing(
+    pricesByEndpointId: Record<string, { unit_price: number; unit: string; currency: string }>,
+  ) {
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes("pricing")) {
+        const ids = url.searchParams.getAll("endpoint_id");
+        return fakePricingResponse(
+          ids
+            .filter((id) => pricesByEndpointId[id])
+            .map((id) => ({ endpoint_id: id, ...pricesByEndpointId[id] })),
+        );
+      }
+      const category = url.searchParams.get("category") ?? "";
+      const models = category === "text-to-image" ? [falEntry()] : [];
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ models, next_cursor: null, has_more: false }),
+      } as Response;
+    };
+    return fetchImpl;
+  }
+
+  it("populates model.pricing when the pricing fetch resolves an entry", async () => {
+    const fetchImpl = fakeFetchWithPricing({
+      "fal-ai/flux/dev": { unit_price: 0.003, unit: "megapixels", currency: "USD" },
+    });
+
+    const models = await listModels({ fetchImpl });
+
+    const model = models.find((m) => m.endpointId === "fal-ai/flux/dev");
+    expect(model?.pricing).toEqual({ unitPrice: 0.003, unit: "megapixels", currency: "USD" });
+  });
+
+  it("still returns the full catalog with no pricing when the pricing fetch fails entirely", async () => {
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes("pricing")) {
+        throw new Error("pricing outage");
+      }
+      const category = url.searchParams.get("category") ?? "";
+      const models = category === "text-to-image" ? [falEntry()] : [];
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ models, next_cursor: null, has_more: false }),
+      } as Response;
+    };
+
+    const models = await listModels({ fetchImpl });
+
+    expect(models.map((m) => m.endpointId)).toContain("fal-ai/flux/dev");
+    const model = models.find((m) => m.endpointId === "fal-ai/flux/dev");
+    expect(model?.pricing).toBeUndefined();
   });
 });

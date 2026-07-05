@@ -13,6 +13,7 @@ import {
   type SortOrder,
 } from "@/lib/model-filter";
 import { familyOptions } from "@/lib/model-family";
+import { formatUnitPrice } from "@/lib/fal-pricing";
 
 // The `/models` page: browses the Model Catalog fetched live from FAL
 // (ADR-0006) and joins it against the app's approvals. Each Model carries an
@@ -152,6 +153,9 @@ export function ModelsBrowser({
 }
 
 function ModelCard({ model, approved }: { model: Model; approved: boolean }) {
+  // Unit Price (CONTEXT.md / ADR-0010 / issue #45): rendered verbatim when
+  // resolvable, nothing when absent (never fetched, 429, outage).
+  const unitPrice = formatUnitPrice(model.pricing);
   // Optimistic toggle: flip locally at once, then persist via the action
   // (mirrors asset-library-browser's useTransition). revalidatePath in the
   // action reconciles the server-rendered state on the next paint.
@@ -186,6 +190,9 @@ function ModelCard({ model, approved }: { model: Model; approved: boolean }) {
         <span className="w-fit rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
           {model.category}
         </span>
+        {unitPrice ? (
+          <span className="text-xs text-muted-foreground">{unitPrice}</span>
+        ) : null}
         {model.description ? (
           <p className="text-sm text-muted-foreground">{model.description}</p>
         ) : null}

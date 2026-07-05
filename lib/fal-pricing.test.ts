@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { fetchModelPricing } from "./fal-pricing";
+import { fetchModelPricing, fetchPricingBatch, formatUnitPrice } from "./fal-pricing";
 
 // fal-pricing (ADR-0009 / issue #37): server-only client for FAL's
 // `GET /v1/models/pricing`, mirroring lib/fal-models.ts's injectable-fetch
@@ -83,5 +83,107 @@ describe("fetchModelPricing", () => {
 
     const headers = calls[0].init?.headers as Record<string, string>;
     expect(headers.Authorization).toBeUndefined();
+  });
+});
+
+// formatUnitPrice (issue #45, ADR-0010): renders a Model's raw Unit Price
+// verbatim, singularizing FAL's plural `unit` field ("seconds" -> "second")
+// for display. Absent pricing renders nothing so the catalog card shows no
+// price rather than a misleading value.
+describe("formatUnitPrice", () => {
+  it("renders a per-second price singularized", () => {
+    expect(formatUnitPrice({ unitPrice: 0.14, unit: "seconds", currency: "USD" })).toBe(
+      "$0.14 / second",
+    );
+  });
+
+  it("renders a per-megapixel price singularized", () => {
+    expect(
+      formatUnitPrice({ unitPrice: 0.025, unit: "megapixels", currency: "USD" }),
+    ).toBe("$0.025 / megapixel");
+  });
+
+  it("renders a per-image price singularized", () => {
+    expect(formatUnitPrice({ unitPrice: 0.04, unit: "images", currency: "USD" })).toBe(
+      "$0.04 / image",
+    );
+  });
+
+  it("renders nothing for null or undefined pricing", () => {
+    expect(formatUnitPrice(null)).toBeUndefined();
+    expect(formatUnitPrice(undefined)).toBeUndefined();
+  });
+});
+
+// fetchPricingBatch (issue #45 / ADR-0010): FAL's pricing endpoint has no
+// bulk mode, caps repeated `endpoint_id` params near ~30/call (100 -> 400),
+// and rate-limits bursts hard. This chunks ids into ~30-sized groups, issues
+// one request per chunk sequentially (never in parallel), and is
+// best-effort: a failing chunk contributes nothing rather than throwing.
+describe("fetchPricingBatch", () => {
+  it("fetches all requested ids in one request when there are <= 30, returning a Map keyed by endpoint id", async () => {
+    const { fetchImpl, calls } = fakeFetch(() =>
+      new Response(
+        JSON.stringify({
+          prices: [
+            { endpoint_id: "fal-ai/a", unit_price: 0.1, unit: "images", currency: "USD" },
+            { endpoint_id: "fal-ai/b", unit_price: 0.2, unit: "seconds", currency: "USD" },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await fetchPricingBatch(["fal-ai/a", "fal-ai/b"], { fetchImpl });
+
+    expect(calls.length).toBe(1);
+    expect(result).toEqual(
+      new Map([
+        ["fal-ai/a", { unitPrice: 0.1, unit: "images", currency: "USD" }],
+        ["fal-ai/b", { unitPrice: 0.2, unit: "seconds", currency: "USD" }],
+      ]),
+    );
+  });
+
+  it("chunks more than 30 ids into multiple sequential requests, each capped near 30", async () => {
+    const endpointIds = Array.from({ length: 61 }, (_, i) => `fal-ai/model-${i}`);
+    const { fetchImpl, calls } = fakeFetch(() =>
+      new Response(JSON.stringify({ prices: [] }), { status: 200 }),
+    );
+
+    await fetchPricingBatch(endpointIds, { fetchImpl });
+
+    expect(calls.length).toBe(3); // 30 + 30 + 1
+    const idsPerCall = calls.map(
+      (call) => new URL(call.url).searchParams.getAll("endpoint_id").length,
+    );
+    expect(idsPerCall).toEqual([30, 30, 1]);
+    for (const count of idsPerCall) {
+      expect(count).toBeLessThanOrEqual(30);
+    }
+  });
+
+  it("still resolves the other chunks' entries when one chunk fails (best-effort, no throw)", async () => {
+    let callIndex = 0;
+    const endpointIds = Array.from({ length: 31 }, (_, i) => `fal-ai/model-${i}`);
+    const { fetchImpl } = fakeFetch(() => {
+      callIndex++;
+      if (callIndex === 1) {
+        throw new Error("network error / 429");
+      }
+      return new Response(
+        JSON.stringify({
+          prices: [
+            { endpoint_id: "fal-ai/model-30", unit_price: 0.5, unit: "images", currency: "USD" },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+
+    const result = await fetchPricingBatch(endpointIds, { fetchImpl });
+
+    expect(result.get("fal-ai/model-30")).toEqual({ unitPrice: 0.5, unit: "images", currency: "USD" });
+    expect(result.size).toBe(1);
   });
 });
