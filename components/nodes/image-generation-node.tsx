@@ -28,6 +28,8 @@ import { cloneVariants } from "@/lib/variant-clone";
 import { approvedModelsForKind, fetchModelSchemaAction } from "@/app/models-actions";
 import type { Model } from "@/lib/fal-models";
 import type { ResolvedHandle } from "@/lib/fal-schema";
+import type { ModelPricing } from "@/lib/fal-pricing";
+import { estimatePrice, formatEstimatedPrice } from "@/lib/price-estimate";
 import { reconcileEdges, resolveEdgeDataTypeFromNodes } from "@/lib/edge-reconcile";
 import type { StaticTextReferenceNodeData } from "@/components/nodes/static-text-reference-node";
 
@@ -42,6 +44,13 @@ export type SelectedModel = {
   category: Model["category"];
   handles: ResolvedHandle[];
   hasNegativePrompt: boolean;
+  // The Model's pricing entry (issue #37 / ADR-0009), snapshotted alongside
+  // the handles at selection time; null when FAL has no resolvable entry for
+  // this endpoint, in which case no Estimated Price is shown.
+  pricing?: ModelPricing | null;
+  // The Model's schema-derived default `duration` (seconds), used to
+  // naively estimate units for a per-second-priced Model (issue #37).
+  defaultDurationSeconds?: number;
 };
 
 export type ImageGenerationNodeData = {
@@ -91,6 +100,18 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
 
   const activeEntry = getActiveEntry(history);
   const selectedModel = data.model;
+
+  // Estimated Price (CONTEXT.md / ADR-0009, issue #37): unit price × naively
+  // estimated units × variant count, recomputed live as the variant counter
+  // changes. Undefined (no display) when the Model has no resolvable
+  // pricing entry, or its pricing unit isn't one this naive estimation
+  // covers (e.g. a per-second Model with no default duration).
+  const estimatedAmount = estimatePrice({
+    pricing: selectedModel?.pricing,
+    variantCount,
+    defaultDurationSeconds: selectedModel?.defaultDurationSeconds,
+  });
+  const estimatedPriceLabel = formatEstimatedPrice(estimatedAmount);
 
   // Model picker (CONTEXT.md's Model / issue #29): the picker's own list is
   // just names/thumbnails from the live catalog joined against approvals —
@@ -388,20 +409,24 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
                 setEdges((edges) => reconcileEdges(edges, id, [], resolveEdgeDataTypeFromNodes(getNode)));
                 return;
               }
-              void fetchModelSchemaAction(chosen.endpointId).then(({ handles, hasNegativePrompt }) => {
-                updateNodeData(id, {
-                  model: {
-                    endpointId: chosen.endpointId,
-                    name: chosen.name,
-                    category: chosen.category,
-                    handles,
-                    hasNegativePrompt,
-                  },
-                });
-                setEdges((edges) =>
-                  reconcileEdges(edges, id, handles, resolveEdgeDataTypeFromNodes(getNode)),
-                );
-              });
+              void fetchModelSchemaAction(chosen.endpointId).then(
+                ({ handles, hasNegativePrompt, pricing, defaultDurationSeconds }) => {
+                  updateNodeData(id, {
+                    model: {
+                      endpointId: chosen.endpointId,
+                      name: chosen.name,
+                      category: chosen.category,
+                      handles,
+                      hasNegativePrompt,
+                      pricing,
+                      defaultDurationSeconds,
+                    },
+                  });
+                  setEdges((edges) =>
+                    reconcileEdges(edges, id, handles, resolveEdgeDataTypeFromNodes(getNode)),
+                  );
+                },
+              );
             }}
           >
             <option value="">Select a model…</option>
@@ -439,14 +464,22 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         </p>
       )}
 
-      <button
-        type="button"
-        onClick={handleGenerate}
-        disabled={isGenerating || !selectedModel}
-        className="nodrag w-full rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
-      >
-        {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={isGenerating || !selectedModel}
+          className="nodrag flex-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+        >
+          {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
+        </button>
+        {/* Estimated Price (CONTEXT.md / ADR-0009, issue #37): an estimate,
+            never a quote — labelled as such, shown only when the selected
+            Model has a resolvable pricing entry. */}
+        {estimatedPriceLabel && (
+          <span className="whitespace-nowrap text-xs text-muted-foreground">{estimatedPriceLabel}</span>
+        )}
+      </div>
 
       {/* Input Handles (ADR-0007 / ADR-0008 / issue #30): none until a Model
           is selected. Once selected, `text` stays the node's fixed prompt

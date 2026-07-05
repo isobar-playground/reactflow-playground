@@ -117,6 +117,28 @@ describe("deriveInputHandles hasNegativePrompt", () => {
   });
 });
 
+// defaultDurationSeconds (issue #37 / ADR-0009): the Estimated Price for a
+// per-second-priced Model naively assumes the schema's *default* duration,
+// so this must be extracted alongside the handles. FAL represents it as a
+// string-enum property (kling's `duration`: type "string", default "5") —
+// not a bare number — so the value is coerced to a number of seconds.
+describe("deriveInputHandles defaultDurationSeconds", () => {
+  it("extracts the default duration (in seconds) from a video model's duration field", () => {
+    const result = deriveInputHandles(
+      klingImageToVideoSchema,
+      "fal-ai/kling-video/v3/pro/image-to-video",
+    );
+
+    expect(result.defaultDurationSeconds).toBe(5);
+  });
+
+  it("is undefined for a model whose schema has no duration field", () => {
+    const result = deriveInputHandles(fluxSchnellSchema, "fal-ai/flux/schnell");
+
+    expect(result.defaultDurationSeconds).toBeUndefined();
+  });
+});
+
 // fetchModelInputSchema (ADR-0008): fetches that ONE endpoint's schema —
 // lazy, at Model selection only, distinct from the live, un-expanded
 // catalog fetch in lib/fal-models.ts.

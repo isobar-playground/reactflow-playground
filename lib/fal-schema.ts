@@ -57,6 +57,9 @@ interface JsonSchemaProperty {
   // "null"}]` instead of a bare `type`, so the effective type has to be read
   // through this wrapper too.
   anyOf?: JsonSchemaProperty[];
+  // A scalar field's default value, e.g. kling's `duration`: a string enum
+  // (`"5"` / `"10"`) with `default: "5"` — not a bare number.
+  default?: string | number;
 }
 
 // The property's effective type: FAL represents an optional field as
@@ -120,6 +123,31 @@ export interface DeriveInputHandlesResult {
    * of the Resolved Prompt.
    */
   hasNegativePrompt: boolean;
+  /**
+   * The Model's schema's default `duration` (in seconds), when it has one
+   * (issue #37 / ADR-0009). The Estimated Price for a per-second-priced
+   * Model naively assumes this default rather than surfacing duration as an
+   * editable parameter (CONTEXT.md keeps scalar params unsurfaced).
+   * Undefined when the schema has no `duration` field or its default can't
+   * be read as a number.
+   */
+  defaultDurationSeconds?: number;
+}
+
+// duration is a scalar parameter (CONTEXT.md: not surfaced as a handle or a
+// config field) but its *default* value is still needed for the naive
+// per-second Estimated Price (issue #37). FAL represents it as a string-enum
+// property (`type: "string", default: "5"`), so the default is coerced to a
+// number rather than assumed numeric already.
+function extractDefaultDurationSeconds(inputSchema: JsonSchemaProperty): number | undefined {
+  const durationProperty = inputSchema.properties?.duration;
+  if (!durationProperty) return undefined;
+
+  const raw = durationProperty.default;
+  if (raw === undefined) return undefined;
+
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) ? seconds : undefined;
 }
 
 export function deriveInputHandles(
@@ -130,6 +158,7 @@ export function deriveInputHandles(
   const inputSchema = resolveInputSchema(document, endpointId);
   if (!inputSchema?.properties) return { handles: [], hasNegativePrompt: false };
 
+  const defaultDurationSeconds = extractDefaultDurationSeconds(inputSchema);
   const handles: ResolvedHandle[] = [];
   const hasNegativePrompt = Object.prototype.hasOwnProperty.call(
     inputSchema.properties,
@@ -159,5 +188,5 @@ export function deriveInputHandles(
     });
   }
 
-  return { handles, hasNegativePrompt };
+  return { handles, hasNegativePrompt, defaultDurationSeconds };
 }

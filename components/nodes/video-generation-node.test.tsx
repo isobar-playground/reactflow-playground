@@ -13,6 +13,7 @@ import {
 import * as generationMock from "@/lib/generation-mock";
 import * as modelsActions from "@/app/models-actions";
 import * as falSchema from "@/lib/fal-schema";
+import * as falPricing from "@/lib/fal-pricing";
 import { VideoGenerationNode, type VideoGenerationNodeData } from "./video-generation-node";
 import { StaticTextReferenceNode } from "./static-text-reference-node";
 import { StaticMediaReferenceNode } from "./static-media-reference-node";
@@ -520,11 +521,12 @@ describe("VideoGenerationNode Model picker (issue #31)", () => {
   };
 
   // Mirrors ImageGenerationNode's #29/#30 tests: selecting a Model also
-  // fetches its schema to derive and snapshot handles, so stub a schema
-  // with no media inputs to keep the picker/label bookkeeping tests
-  // focused and network-free.
+  // fetches its schema to derive and snapshot handles, and (issue #37) its
+  // pricing entry, so stub both with no media inputs / no pricing to keep
+  // the picker/label bookkeeping tests focused and network-free.
   beforeEach(() => {
     vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({ paths: {}, components: {} });
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -605,6 +607,8 @@ describe("VideoGenerationNode Model picker (issue #31)", () => {
         category: "image-to-video",
         handles: [],
         hasNegativePrompt: false,
+        pricing: null,
+        defaultDurationSeconds: undefined,
       });
     });
   });
@@ -729,6 +733,7 @@ describe("VideoGenerationNode schema-derived Input Handles (issue #31)", () => {
         },
       },
     });
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
     const user = userEvent.setup();
     let getNodeRef: ((id: string) => Node | undefined) | undefined;
 
@@ -949,6 +954,7 @@ describe("VideoGenerationNode edge reconciliation on Model change (issue #33)", 
     vi.spyOn(falSchema, "fetchModelInputSchema").mockImplementation(async (endpointId: string) =>
       endpointId === "fal-ai/kling-video/v3/pro/image-to-video" ? klingSchema : textToVideoSchema,
     );
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
     const { user, getEdgesRef } = renderWithConnectedReferences({
       endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
       name: "Kling Video v3 Pro",
@@ -970,6 +976,7 @@ describe("VideoGenerationNode edge reconciliation on Model change (issue #33)", 
   it("keeps input edges whose handle is still present and type-compatible after re-selecting the same Model", async () => {
     vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling]);
     vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue(klingSchema);
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
     const { user, getEdgesRef } = renderWithConnectedReferences({
       endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
       name: "Kling Video v3 Pro",
@@ -1069,6 +1076,7 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
         },
       },
     });
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
     const user = userEvent.setup();
     renderNode();
 
@@ -1082,6 +1090,7 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
   it("does not show the field for a Model whose schema lacks negative_prompt", async () => {
     vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([veo]);
     vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({ paths: {}, components: {} });
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
     const user = userEvent.setup();
     renderNode();
 
@@ -1183,5 +1192,74 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
     const resolvedPromptBlock = resolvedPromptHeading.parentElement as HTMLElement;
     expect(within(resolvedPromptBlock).getByText("a dog running")).toBeInTheDocument();
     expect(within(resolvedPromptBlock).queryByText(/blurry/i)).not.toBeInTheDocument();
+  });
+});
+
+// Estimated Price (CONTEXT.md / ADR-0009, issue #37): shown next to Generate
+// once the selected Model has a snapshotted pricing entry — for video,
+// per-second pricing is the common case, using the schema's default
+// duration.
+describe("VideoGenerationNode Estimated Price (issue #37)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows no estimate when the selected Model has no pricing snapshot", () => {
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+        name: "Kling Video v3 Pro",
+        category: "image-to-video",
+        handles: [],
+        hasNegativePrompt: false,
+      },
+    });
+
+    expect(screen.queryByText(/est\.?\s*~?\$/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the estimate for a per-second-priced Model using the schema's default duration", () => {
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+        name: "Kling Video v3 Pro",
+        category: "image-to-video",
+        handles: [],
+        hasNegativePrompt: false,
+        pricing: { unitPrice: 0.14, unit: "seconds", currency: "USD" },
+        defaultDurationSeconds: 5,
+      },
+    });
+
+    expect(screen.getByText("Est. ~$0.70")).toBeInTheDocument();
+  });
+
+  it("updates the estimate live when the variant count changes", async () => {
+    const user = userEvent.setup();
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+        name: "Kling Video v3 Pro",
+        category: "image-to-video",
+        handles: [],
+        hasNegativePrompt: false,
+        pricing: { unitPrice: 0.14, unit: "seconds", currency: "USD" },
+        defaultDurationSeconds: 5,
+      },
+    });
+
+    expect(screen.getByText("Est. ~$0.70")).toBeInTheDocument();
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "2");
+
+    expect(screen.getByText("Est. ~$1.40")).toBeInTheDocument();
   });
 });

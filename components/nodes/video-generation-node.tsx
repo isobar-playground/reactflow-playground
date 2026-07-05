@@ -30,6 +30,7 @@ import type { ResolvedHandle } from "@/lib/fal-schema";
 import { reconcileEdges, resolveEdgeDataTypeFromNodes } from "@/lib/edge-reconcile";
 import type { StaticTextReferenceNodeData } from "@/components/nodes/static-text-reference-node";
 import type { SelectedModel } from "@/components/nodes/image-generation-node";
+import { estimatePrice, formatEstimatedPrice } from "@/lib/price-estimate";
 
 export type VideoGenerationNodeData = {
   prompt: string;
@@ -71,6 +72,18 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
 
   const activeEntry = getActiveEntry(history);
   const selectedModel = data.model;
+
+  // Estimated Price (CONTEXT.md / ADR-0009, issue #37): unit price × naively
+  // estimated units × variant count, recomputed live as the variant counter
+  // changes. Undefined (no display) when the Model has no resolvable
+  // pricing entry, or its pricing unit isn't one this naive estimation
+  // covers (e.g. a per-second Model with no default duration).
+  const estimatedAmount = estimatePrice({
+    pricing: selectedModel?.pricing,
+    variantCount,
+    defaultDurationSeconds: selectedModel?.defaultDurationSeconds,
+  });
+  const estimatedPriceLabel = formatEstimatedPrice(estimatedAmount);
 
   // Model picker (CONTEXT.md's Model / issue #31): the picker's own list is
   // just names/thumbnails from the live catalog joined against approvals —
@@ -335,20 +348,24 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
                 setEdges((edges) => reconcileEdges(edges, id, [], resolveEdgeDataTypeFromNodes(getNode)));
                 return;
               }
-              void fetchModelSchemaAction(chosen.endpointId).then(({ handles, hasNegativePrompt }) => {
-                updateNodeData(id, {
-                  model: {
-                    endpointId: chosen.endpointId,
-                    name: chosen.name,
-                    category: chosen.category,
-                    handles,
-                    hasNegativePrompt,
-                  },
-                });
-                setEdges((edges) =>
-                  reconcileEdges(edges, id, handles, resolveEdgeDataTypeFromNodes(getNode)),
-                );
-              });
+              void fetchModelSchemaAction(chosen.endpointId).then(
+                ({ handles, hasNegativePrompt, pricing, defaultDurationSeconds }) => {
+                  updateNodeData(id, {
+                    model: {
+                      endpointId: chosen.endpointId,
+                      name: chosen.name,
+                      category: chosen.category,
+                      handles,
+                      hasNegativePrompt,
+                      pricing,
+                      defaultDurationSeconds,
+                    },
+                  });
+                  setEdges((edges) =>
+                    reconcileEdges(edges, id, handles, resolveEdgeDataTypeFromNodes(getNode)),
+                  );
+                },
+              );
             }}
           >
             <option value="">Select a model…</option>
@@ -378,14 +395,22 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
         <p className="mb-3 text-xs text-muted-foreground">Select a model to configure this node.</p>
       )}
 
-      <button
-        type="button"
-        onClick={handleGenerate}
-        disabled={isGenerating}
-        className="nodrag w-full rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
-      >
-        {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={isGenerating}
+          className="nodrag flex-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+        >
+          {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
+        </button>
+        {/* Estimated Price (CONTEXT.md / ADR-0009, issue #37): an estimate,
+            never a quote — labelled as such, shown only when the selected
+            Model has a resolvable pricing entry. */}
+        {estimatedPriceLabel && (
+          <span className="whitespace-nowrap text-xs text-muted-foreground">{estimatedPriceLabel}</span>
+        )}
+      </div>
 
       {/* Input Handles (ADR-0007 / ADR-0008 / issue #31): none until a Model
           is selected. Once selected, `text` stays the node's fixed prompt

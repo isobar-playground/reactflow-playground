@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { getDb, migrate, resetDbForTests } from "@/lib/db";
 import { resetFalModelsForTests } from "@/lib/fal-models";
+import * as falSchema from "@/lib/fal-schema";
+import * as falPricing from "@/lib/fal-pricing";
 
 // Server actions call revalidatePath, which throws outside a real Next.js
 // request context — stub it the same way app/library-actions.test.ts does.
@@ -85,5 +87,39 @@ describe("models-actions — approvedModelsForKind", () => {
     const result = await approvedModelsForKind("image");
 
     expect(result).toEqual([]);
+  });
+});
+
+// fetchModelSchemaAction (issue #37 / ADR-0009): Model selection now also
+// snapshots the Model's pricing entry alongside the schema-derived handles —
+// fetched in the same server action, since the schema fetch already needs to
+// run server-side (FAL's openapi.json has no CORS either).
+describe("models-actions — fetchModelSchemaAction pricing snapshot (issue #37)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("includes the Model's pricing entry alongside the derived handles", async () => {
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({ paths: {}, components: {} });
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue({
+      unitPrice: 0.003,
+      unit: "megapixels",
+      currency: "USD",
+    });
+
+    const { fetchModelSchemaAction } = await import("./models-actions");
+    const result = await fetchModelSchemaAction("fal-ai/flux/schnell");
+
+    expect(result.pricing).toEqual({ unitPrice: 0.003, unit: "megapixels", currency: "USD" });
+  });
+
+  it("includes null pricing when the Model has no resolvable pricing entry", async () => {
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({ paths: {}, components: {} });
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
+
+    const { fetchModelSchemaAction } = await import("./models-actions");
+    const result = await fetchModelSchemaAction("fal-ai/does-not-exist");
+
+    expect(result.pricing).toBeNull();
   });
 });

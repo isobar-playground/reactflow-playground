@@ -13,6 +13,7 @@ import {
 import * as realGeneration from "@/lib/real-generation";
 import * as modelsActions from "@/app/models-actions";
 import * as falSchema from "@/lib/fal-schema";
+import * as falPricing from "@/lib/fal-pricing";
 import { ImageGenerationNode, type ImageGenerationNodeData } from "./image-generation-node";
 import { StaticTextReferenceNode } from "./static-text-reference-node";
 import { StaticMediaReferenceNode } from "./static-media-reference-node";
@@ -767,12 +768,14 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
     tags: [],
   };
 
-  // Issue #30 / ADR-0008: selecting a Model now also fetches its schema to
-  // derive and snapshot handles. These #29-era tests only care about the
-  // model/label bookkeeping, so stub a schema with no media inputs to keep
-  // them focused (and network-free).
+  // Issue #30 / ADR-0008 (and issue #37 for pricing): selecting a Model now
+  // also fetches its schema to derive and snapshot handles, and its pricing
+  // entry. These #29-era tests only care about the model/label bookkeeping,
+  // so stub both with no media inputs / no pricing to keep them focused
+  // (and network-free).
   beforeEach(() => {
     vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({ paths: {}, components: {} });
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -853,6 +856,8 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
         category: "text-to-image",
         handles: [],
         hasNegativePrompt: false,
+        pricing: null,
+        defaultDurationSeconds: undefined,
       });
     });
   });
@@ -953,6 +958,7 @@ describe("ImageGenerationNode schema-derived Input Handles (issue #30)", () => {
     const fetchSchema = vi
       .spyOn(falSchema, "fetchModelInputSchema")
       .mockResolvedValue(nanoBanana2EditSchema);
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
     const user = userEvent.setup();
     let getNodeRef: ((id: string) => Node | undefined) | undefined;
 
@@ -1133,6 +1139,7 @@ describe("ImageGenerationNode edge reconciliation on Model change (issue #33)", 
     vi.spyOn(falSchema, "fetchModelInputSchema").mockImplementation(async (endpointId: string) =>
       endpointId === "fal-ai/nano-banana-2/edit" ? nanoBanana2EditSchema : fluxSchnellSchema,
     );
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
     const { user, getEdgesRef } = renderWithConnectedReferences({
       endpointId: "fal-ai/nano-banana-2/edit",
       name: "Nano Banana 2 Edit",
@@ -1155,6 +1162,7 @@ describe("ImageGenerationNode edge reconciliation on Model change (issue #33)", 
   it("keeps input edges whose handle is still present and type-compatible after the Model change", async () => {
     vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([editModel]);
     vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue(nanoBanana2EditSchema);
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
     const { user, getEdgesRef } = renderWithConnectedReferences({
       endpointId: "fal-ai/nano-banana-2/edit",
       name: "Nano Banana 2 Edit",
@@ -1255,6 +1263,7 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
         },
       },
     });
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
     const user = userEvent.setup();
     renderNode();
 
@@ -1268,6 +1277,7 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
   it("does not show the field for a Model whose schema lacks negative_prompt", async () => {
     vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([noNegativePromptModel]);
     vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({ paths: {}, components: {} });
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
     const user = userEvent.setup();
     renderNode();
 
@@ -1617,5 +1627,61 @@ describe("ImageGenerationNode real generation (issue #36)", () => {
     await waitFor(() => {
       expect(screen.getAllByRole("img", { name: "Generation output" })).toHaveLength(1);
     });
+  });
+});
+
+// Estimated Price (CONTEXT.md / ADR-0009, issue #37): shown next to Generate
+// once the selected Model has a snapshotted pricing entry — unit price ×
+// naively estimated units × variant count. Never a quote.
+describe("ImageGenerationNode Estimated Price (issue #37)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows no estimate when the selected Model has no pricing snapshot", () => {
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
+
+    expect(screen.queryByText(/est\.?\s*~?\$/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the formatted estimate for a per-image-priced Model", () => {
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: { ...testModel, pricing: { unitPrice: 0.08, unit: "images", currency: "USD" } },
+    });
+
+    expect(screen.getByText("Est. ~$0.08")).toBeInTheDocument();
+  });
+
+  it("updates the estimate live when the variant count changes", async () => {
+    const user = userEvent.setup();
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: { ...testModel, pricing: { unitPrice: 0.08, unit: "images", currency: "USD" } },
+    });
+
+    expect(screen.getByText("Est. ~$0.08")).toBeInTheDocument();
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "4");
+
+    expect(screen.getByText("Est. ~$0.32")).toBeInTheDocument();
+  });
+
+  it("shows the estimate for a per-second-priced Model using the schema's default duration", () => {
+    renderNode({
+      prompt: "",
+      history: { entries: [], activeId: null },
+      model: {
+        ...testModel,
+        pricing: { unitPrice: 0.14, unit: "seconds", currency: "USD" },
+        defaultDurationSeconds: 5,
+      },
+    });
+
+    expect(screen.getByText("Est. ~$0.70")).toBeInTheDocument();
   });
 });
