@@ -1,5 +1,3 @@
-import type { ImagePlaceholderResult, VideoPlaceholderResult } from "./generation-mock";
-
 // Per-node History (CONTEXT.md): the ordered list of outputs a single
 // Generation Node has produced. One entry is the Active Output — what the
 // node displays and what downstream consumers would read. The caller builds
@@ -8,7 +6,21 @@ import type { ImagePlaceholderResult, VideoPlaceholderResult } from "./generatio
 //
 // The output is a union (issue #11 adds VideoPlaceholderResult for the
 // Video Generation Node) since History is the same shape for both Image and
-// Video Generation Nodes — only the placeholder kind differs.
+// Video Generation Nodes — only the placeholder kind differs. These two
+// types used to live in the now-deleted lib/generation-mock.ts; issue #39
+// moves them here — where History itself lives — so the persisted shape of
+// a HistoryEntry's `output` stays byte-for-byte identical and previously
+// saved canvases (picsum image entries, /sample-video.mp4 entries) still
+// load and render exactly as before.
+export interface ImagePlaceholderResult {
+  kind: "image";
+  url: string;
+}
+
+export interface VideoPlaceholderResult {
+  kind: "video";
+  url: string;
+}
 
 export interface HistoryEntry {
   id: string;

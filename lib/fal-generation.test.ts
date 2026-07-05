@@ -115,7 +115,7 @@ describe("getGenerationResult", () => {
 
     const result = await getGenerationResult("https://queue.fal.run/x", { fetchImpl });
 
-    expect(result).toEqual({ imageUrl: "https://fal.media/a.png" });
+    expect(result).toEqual({ mediaUrl: "https://fal.media/a.png" });
   });
 
   it("extracts the image URL from a single `image` object result", async () => {
@@ -125,14 +125,39 @@ describe("getGenerationResult", () => {
 
     const result = await getGenerationResult("https://queue.fal.run/x", { fetchImpl });
 
-    expect(result).toEqual({ imageUrl: "https://fal.media/solo.png" });
+    expect(result).toEqual({ mediaUrl: "https://fal.media/solo.png" });
   });
 
-  it("throws when the result has no recognizable image URL", async () => {
+  // Video Generation Node results (issue #39): FAL's video models answer
+  // with a single `video: {url}` object rather than an `images` array.
+  it("extracts the video URL from a single `video` object result", async () => {
+    const { fetchImpl } = fakeFetch(() =>
+      new Response(JSON.stringify({ video: { url: "https://fal.media/clip.mp4" } }), { status: 200 }),
+    );
+
+    const result = await getGenerationResult("https://queue.fal.run/x", { fetchImpl });
+
+    expect(result).toEqual({ mediaUrl: "https://fal.media/clip.mp4" });
+  });
+
+  it("extracts the first video URL from a `videos` array result", async () => {
+    const { fetchImpl } = fakeFetch(() =>
+      new Response(
+        JSON.stringify({ videos: [{ url: "https://fal.media/clip-a.mp4" }, { url: "https://fal.media/clip-b.mp4" }] }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await getGenerationResult("https://queue.fal.run/x", { fetchImpl });
+
+    expect(result).toEqual({ mediaUrl: "https://fal.media/clip-a.mp4" });
+  });
+
+  it("throws when the result has no recognizable media URL", async () => {
     const { fetchImpl } = fakeFetch(() => new Response(JSON.stringify({}), { status: 200 }));
 
     await expect(getGenerationResult("https://queue.fal.run/x", { fetchImpl })).rejects.toThrow(
-      /no image url/i,
+      /no media url/i,
     );
   });
 

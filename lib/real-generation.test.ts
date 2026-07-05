@@ -1,9 +1,16 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as generationActions from "@/app/generation-actions";
-import { runImageGeneration, resumeImageGeneration } from "./real-generation";
+import {
+  runImageGeneration,
+  resumeImageGeneration,
+  runVideoGeneration,
+  resumeVideoGeneration,
+} from "./real-generation";
 
 // real-generation: the node-facing call that submits via the queue-API
-// server action and polls the status action until FAL is done.
+// server action and polls the status action until FAL is done. Shared
+// submit/poll internals back both the Image and Video Generation Node's
+// functions (issue #39 / ADR-0009's "one transport for both node kinds").
 
 describe("runImageGeneration", () => {
   afterEach(() => {
@@ -20,7 +27,7 @@ describe("runImageGeneration", () => {
     vi.spyOn(generationActions, "submitGenerationAction").mockResolvedValue(pending);
     vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
       status: "completed",
-      imageUrl: "https://fal.media/out.png",
+      mediaUrl: "https://fal.media/out.png",
     });
 
     const result = await runImageGeneration({
@@ -40,7 +47,7 @@ describe("runImageGeneration", () => {
     vi.spyOn(generationActions, "submitGenerationAction").mockResolvedValue(pending);
     vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
       status: "completed",
-      imageUrl: "https://fal.media/out.png",
+      mediaUrl: "https://fal.media/out.png",
     });
 
     await runImageGeneration({ endpointId: "fal-ai/flux/schnell", prompt: "a red car" });
@@ -54,7 +61,7 @@ describe("runImageGeneration", () => {
     vi.spyOn(generationActions, "submitGenerationAction").mockResolvedValue(pending);
     vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
       status: "completed",
-      imageUrl: "https://fal.media/out.png",
+      mediaUrl: "https://fal.media/out.png",
     });
     const onPending = vi.fn();
 
@@ -72,7 +79,7 @@ describe("runImageGeneration", () => {
       .spyOn(generationActions, "pollGenerationAction")
       .mockResolvedValueOnce({ status: "pending" })
       .mockResolvedValueOnce({ status: "pending" })
-      .mockResolvedValueOnce({ status: "completed", imageUrl: "https://fal.media/out.png" });
+      .mockResolvedValueOnce({ status: "completed", mediaUrl: "https://fal.media/out.png" });
     const wait = vi.fn().mockResolvedValue(undefined);
 
     const result = await runImageGeneration(
@@ -118,7 +125,7 @@ describe("resumeImageGeneration", () => {
     const submit = vi.spyOn(generationActions, "submitGenerationAction");
     vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
       status: "completed",
-      imageUrl: "https://fal.media/out.png",
+      mediaUrl: "https://fal.media/out.png",
     });
 
     const result = await resumeImageGeneration(pending);
@@ -131,7 +138,7 @@ describe("resumeImageGeneration", () => {
     const poll = vi
       .spyOn(generationActions, "pollGenerationAction")
       .mockResolvedValueOnce({ status: "pending" })
-      .mockResolvedValueOnce({ status: "completed", imageUrl: "https://fal.media/out.png" });
+      .mockResolvedValueOnce({ status: "completed", mediaUrl: "https://fal.media/out.png" });
     const wait = vi.fn().mockResolvedValue(undefined);
 
     const result = await resumeImageGeneration(pending, { wait, pollIntervalMs: 500 });
@@ -148,5 +155,154 @@ describe("resumeImageGeneration", () => {
     });
 
     await expect(resumeImageGeneration(pending)).rejects.toThrow("FAL queue status returned 404");
+  });
+});
+
+// Video Generation Node's real generation (issue #39): identical submit/poll
+// mechanics to the image path above, just resolving to a `{kind: "video"}`
+// placeholder — proves the shared pollUntilSettled loop tags the right kind
+// rather than assuming image.
+describe("runVideoGeneration", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const pending = {
+    requestId: "req-1",
+    statusUrl: "https://queue.fal.run/x/status",
+    responseUrl: "https://queue.fal.run/x",
+  };
+
+  it("submits the prompt (and negative_prompt when given) and resolves to the video once completed", async () => {
+    vi.spyOn(generationActions, "submitGenerationAction").mockResolvedValue(pending);
+    vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
+      status: "completed",
+      mediaUrl: "https://fal.media/clip.mp4",
+    });
+
+    const result = await runVideoGeneration({
+      endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+      prompt: "a car driving fast",
+      negativePrompt: "blurry",
+    });
+
+    expect(generationActions.submitGenerationAction).toHaveBeenCalledWith(
+      "fal-ai/kling-video/v3/pro/image-to-video",
+      { prompt: "a car driving fast", negative_prompt: "blurry" },
+    );
+    expect(result).toEqual({ kind: "video", url: "https://fal.media/clip.mp4" });
+  });
+
+  it("omits negative_prompt from the request body when not given", async () => {
+    vi.spyOn(generationActions, "submitGenerationAction").mockResolvedValue(pending);
+    vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
+      status: "completed",
+      mediaUrl: "https://fal.media/clip.mp4",
+    });
+
+    await runVideoGeneration({ endpointId: "fal-ai/veo/text-to-video", prompt: "a car driving fast" });
+
+    expect(generationActions.submitGenerationAction).toHaveBeenCalledWith("fal-ai/veo/text-to-video", {
+      prompt: "a car driving fast",
+    });
+  });
+
+  it("calls onPending with the submitted record before polling", async () => {
+    vi.spyOn(generationActions, "submitGenerationAction").mockResolvedValue(pending);
+    vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
+      status: "completed",
+      mediaUrl: "https://fal.media/clip.mp4",
+    });
+    const onPending = vi.fn();
+
+    await runVideoGeneration(
+      { endpointId: "fal-ai/veo/text-to-video", prompt: "a car driving fast" },
+      { onPending },
+    );
+
+    expect(onPending).toHaveBeenCalledWith(pending);
+  });
+
+  it("polls again (via the injectable wait) while the status is pending, then resolves", async () => {
+    vi.spyOn(generationActions, "submitGenerationAction").mockResolvedValue(pending);
+    const poll = vi
+      .spyOn(generationActions, "pollGenerationAction")
+      .mockResolvedValueOnce({ status: "pending" })
+      .mockResolvedValueOnce({ status: "pending" })
+      .mockResolvedValueOnce({ status: "completed", mediaUrl: "https://fal.media/clip.mp4" });
+    const wait = vi.fn().mockResolvedValue(undefined);
+
+    const result = await runVideoGeneration(
+      { endpointId: "fal-ai/veo/text-to-video", prompt: "a car driving fast" },
+      { wait, pollIntervalMs: 1234 },
+    );
+
+    expect(poll).toHaveBeenCalledTimes(3);
+    expect(wait).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(1234);
+    expect(result).toEqual({ kind: "video", url: "https://fal.media/clip.mp4" });
+  });
+
+  it("throws with the FAL error message when the poll reports an error", async () => {
+    vi.spyOn(generationActions, "submitGenerationAction").mockResolvedValue(pending);
+    vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
+      status: "error",
+      message: "moderation blocked the request",
+    });
+
+    await expect(
+      runVideoGeneration({ endpointId: "fal-ai/veo/text-to-video", prompt: "a car driving fast" }),
+    ).rejects.toThrow("moderation blocked the request");
+  });
+});
+
+// resumeVideoGeneration (issue #38's treatment, extended to video by issue
+// #39): resumes polling an already-submitted video pending record without
+// re-submitting to FAL.
+describe("resumeVideoGeneration", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const pending = {
+    requestId: "req-1",
+    statusUrl: "https://queue.fal.run/x/status",
+    responseUrl: "https://queue.fal.run/x",
+  };
+
+  it("polls the given pending record without submitting a new request, and resolves once completed", async () => {
+    const submit = vi.spyOn(generationActions, "submitGenerationAction");
+    vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
+      status: "completed",
+      mediaUrl: "https://fal.media/clip.mp4",
+    });
+
+    const result = await resumeVideoGeneration(pending);
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(result).toEqual({ kind: "video", url: "https://fal.media/clip.mp4" });
+  });
+
+  it("keeps polling (via the injectable wait) while still pending, then resolves", async () => {
+    const poll = vi
+      .spyOn(generationActions, "pollGenerationAction")
+      .mockResolvedValueOnce({ status: "pending" })
+      .mockResolvedValueOnce({ status: "completed", mediaUrl: "https://fal.media/clip.mp4" });
+    const wait = vi.fn().mockResolvedValue(undefined);
+
+    const result = await resumeVideoGeneration(pending, { wait, pollIntervalMs: 500 });
+
+    expect(poll).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(500);
+    expect(result).toEqual({ kind: "video", url: "https://fal.media/clip.mp4" });
+  });
+
+  it("throws when FAL no longer recognizes the resumed request (stale record)", async () => {
+    vi.spyOn(generationActions, "pollGenerationAction").mockResolvedValue({
+      status: "error",
+      message: "FAL queue status returned 404",
+    });
+
+    await expect(resumeVideoGeneration(pending)).rejects.toThrow("FAL queue status returned 404");
   });
 });

@@ -10,7 +10,7 @@ import {
   type Edge,
   type Node,
 } from "@xyflow/react";
-import * as generationMock from "@/lib/generation-mock";
+import * as realGeneration from "@/lib/real-generation";
 import * as modelsActions from "@/app/models-actions";
 import * as falSchema from "@/lib/fal-schema";
 import * as falPricing from "@/lib/fal-pricing";
@@ -31,6 +31,17 @@ const nodeTypes = {
   videoGeneration: VideoGenerationNode,
   staticTextReference: StaticTextReferenceNode,
   staticMediaReference: StaticMediaReferenceNode,
+};
+
+// A selected Model (CONTEXT.md / ADR-0009): Generate is disabled without one
+// (issue #39), so every test that actually clicks Generate/Regenerate needs
+// one in its node data — only the "no Model selected yet" tests omit it.
+const testModel: VideoGenerationNodeData["model"] = {
+  endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+  name: "Kling Video v3 Pro",
+  category: "image-to-video",
+  handles: [],
+  hasNegativePrompt: false,
 };
 
 // Node data write-through (ADR-0002) only round-trips back into a controlled
@@ -111,14 +122,14 @@ describe("VideoGenerationNode generation", () => {
   });
 
   it("shows a loading state then plays the looping placeholder video after clicking Generate", async () => {
-    let resolveGeneration!: (result: generationMock.VideoPlaceholderResult) => void;
-    vi.spyOn(generationMock, "generateVideoPlaceholder").mockReturnValue(
+    let resolveGeneration!: (result: { kind: "video"; url: string }) => void;
+    vi.spyOn(realGeneration, "runVideoGeneration").mockReturnValue(
       new Promise((resolve) => {
         resolveGeneration = resolve;
       }),
     );
     const user = userEvent.setup();
-    const { container } = renderNode();
+    const { container } = renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
@@ -136,12 +147,12 @@ describe("VideoGenerationNode generation", () => {
   });
 
   it("changes the button label to Regenerate after the first output exists", async () => {
-    vi.spyOn(generationMock, "generateVideoPlaceholder").mockResolvedValue({
+    vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
       kind: "video",
       url: "/sample-video.mp4",
     });
     const user = userEvent.setup();
-    renderNode();
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
@@ -207,7 +218,7 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
 
   it("clones (count - 1) siblings beside the node when the counter is above one and Generate is clicked", async () => {
     const generate = vi
-      .spyOn(generationMock, "generateVideoPlaceholder")
+      .spyOn(realGeneration, "runVideoGeneration")
       .mockResolvedValue({ kind: "video", url: "/sample-video.mp4" });
     const user = userEvent.setup();
     const { container } = renderInCanvas([
@@ -217,7 +228,7 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
         position: { x: 0, y: 0 },
         initialWidth: 400,
         initialHeight: 500,
-        data: { prompt: "", history: { entries: [], activeId: null } },
+        data: { prompt: "", history: { entries: [], activeId: null }, model: testModel },
       },
     ]);
 
@@ -241,12 +252,12 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
   });
 
   it("resets the variant counter to 1 after cloning", async () => {
-    vi.spyOn(generationMock, "generateVideoPlaceholder").mockResolvedValue({
+    vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
       kind: "video",
       url: "/sample-video.mp4",
     });
     const user = userEvent.setup();
-    renderNode();
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
     const counter = screen.getByRole("spinbutton", { name: /variant/i });
     await user.clear(counter);
@@ -259,12 +270,12 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
   });
 
   it("behaves exactly as a normal Generate when the counter is left at 1 (no cloning)", async () => {
-    vi.spyOn(generationMock, "generateVideoPlaceholder").mockResolvedValue({
+    vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
       kind: "video",
       url: "/sample-video.mp4",
     });
     const user = userEvent.setup();
-    const { container } = renderNode();
+    const { container } = renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
@@ -274,7 +285,7 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
   });
 
   it("wires each clone to the original's incoming Static Text Reference, without duplicating any outgoing edge", async () => {
-    vi.spyOn(generationMock, "generateVideoPlaceholder").mockResolvedValue({
+    vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
       kind: "video",
       url: "/sample-video.mp4",
     });
@@ -296,7 +307,7 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
           position: { x: 0, y: 0 },
           initialWidth: 400,
           initialHeight: 500,
-          data: { prompt: "", history: { entries: [], activeId: null } },
+          data: { prompt: "", history: { entries: [], activeId: null }, model: testModel },
         },
       ],
       [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }],
@@ -389,7 +400,7 @@ describe("VideoGenerationNode persistence", () => {
   // `data.history`, not local component state, or they vanish on reload.
   // Verified via getNode(id), not the DOM alone.
   it("writes a generated History entry through to node data", async () => {
-    vi.spyOn(generationMock, "generateVideoPlaceholder").mockResolvedValue({
+    vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
       kind: "video",
       url: "/sample-video.mp4",
     });
@@ -404,7 +415,7 @@ describe("VideoGenerationNode persistence", () => {
           position: { x: 0, y: 0 },
           initialWidth: 400,
           initialHeight: 500,
-          data: { prompt: "driving fast", history: { entries: [], activeId: null } },
+          data: { prompt: "driving fast", history: { entries: [], activeId: null }, model: testModel },
         },
       ]);
       const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
@@ -436,7 +447,7 @@ describe("VideoGenerationNode persistence", () => {
   });
 
   it("writes the restored prompt and activeId through to node data when selecting an older History entry", async () => {
-    vi.spyOn(generationMock, "generateVideoPlaceholder")
+    vi.spyOn(realGeneration, "runVideoGeneration")
       .mockResolvedValueOnce({ kind: "video", url: "/sample-video-a.mp4" })
       .mockResolvedValueOnce({ kind: "video", url: "/sample-video-b.mp4" });
     const user = userEvent.setup();
@@ -450,7 +461,7 @@ describe("VideoGenerationNode persistence", () => {
           position: { x: 0, y: 0 },
           initialWidth: 400,
           initialHeight: 500,
-          data: { prompt: "", history: { entries: [], activeId: null } },
+          data: { prompt: "", history: { entries: [], activeId: null }, model: testModel },
         },
       ]);
       const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
@@ -648,7 +659,7 @@ describe("VideoGenerationNode Model picker (issue #31)", () => {
   });
 
   it("preserves the selected Model when the node is cloned as a Variant", async () => {
-    vi.spyOn(generationMock, "generateVideoPlaceholder").mockResolvedValue({
+    vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
       kind: "video",
       url: "/sample-video.mp4",
     });
@@ -1261,5 +1272,400 @@ describe("VideoGenerationNode Estimated Price (issue #37)", () => {
     await user.type(counter, "2");
 
     expect(screen.getByText("Est. ~$1.40")).toBeInTheDocument();
+  });
+});
+
+// Real FAL generation via the queue API (CONTEXT.md / ADR-0009, issue #39 —
+// the video-node equivalent of #36). lib/real-generation.ts is mocked here
+// exactly like the old generation-mock module was — these tests only care
+// about the node's own behavior (what it sends, what it persists, how it
+// reacts to success/failure), not lib/real-generation's or the server
+// actions' internals (covered by their own unit tests).
+describe("VideoGenerationNode real generation (issue #39)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("disables Generate when no Model is selected", () => {
+    renderNode();
+
+    expect(screen.getByRole("button", { name: "Generate" })).toBeDisabled();
+  });
+
+  it("enables Generate once a Model is selected", () => {
+    renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
+
+    expect(screen.getByRole("button", { name: "Generate" })).toBeEnabled();
+  });
+
+  it("submits the Resolved Prompt as `prompt`, and negative_prompt when the Model supports it", async () => {
+    const run = vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
+      kind: "video",
+      url: "https://fal.media/out.mp4",
+    });
+    const user = userEvent.setup();
+    renderInCanvas(
+      [
+        {
+          id: "ref1",
+          type: "staticTextReference",
+          position: { x: -300, y: 0 },
+          initialWidth: 200,
+          initialHeight: 100,
+          data: { text: "a red car" },
+        },
+        {
+          id: "gen1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: {
+            prompt: "driving fast",
+            history: { entries: [], activeId: null },
+            model: { ...testModel, hasNegativePrompt: true },
+            negativePrompt: "blurry, low quality",
+          },
+        },
+      ],
+      [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }],
+    );
+
+    const gen1Container = document.querySelector('[data-node-id="gen1"]') as HTMLElement;
+    await user.click(within(gen1Container).getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+          prompt: "a red car driving fast",
+          negativePrompt: "blurry, low quality",
+        }),
+        expect.anything(),
+      );
+    });
+  });
+
+  it("omits negativePrompt from the call when the Model's schema has no negative_prompt", async () => {
+    const run = vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
+      kind: "video",
+      url: "https://fal.media/out.mp4",
+    });
+    const user = userEvent.setup();
+    renderNode({ prompt: "a car", history: { entries: [], activeId: null }, model: testModel });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
+          prompt: "a car",
+          negativePrompt: undefined,
+        }),
+        expect.anything(),
+      );
+    });
+  });
+
+  it("writes the pending generation record into node data once FAL accepts the request, and clears it once it completes", async () => {
+    const pending = {
+      requestId: "req-1",
+      statusUrl: "https://queue.fal.run/x/status",
+      responseUrl: "https://queue.fal.run/x",
+    };
+    let resolveGeneration!: (result: { kind: "video"; url: string }) => void;
+    vi.spyOn(realGeneration, "runVideoGeneration").mockImplementation(async (_input, options) => {
+      options?.onPending?.(pending);
+      return new Promise((resolve) => {
+        resolveGeneration = resolve;
+      });
+    });
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "a car", history: { entries: [], activeId: null }, model: testModel },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.pendingGeneration).toEqual(pending);
+    });
+
+    resolveGeneration({ kind: "video", url: "https://fal.media/out.mp4" });
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.history.entries).toHaveLength(1);
+      expect(data.pendingGeneration).toBeNull();
+    });
+  });
+
+  it("shows an error message and adds no History entry when the FAL generation fails", async () => {
+    vi.spyOn(realGeneration, "runVideoGeneration").mockRejectedValue(
+      new Error("FAL queue submit returned 422 for fal-ai/kling-video/v3/pro/image-to-video"),
+    );
+    const user = userEvent.setup();
+    renderNode({ prompt: "a car", history: { entries: [], activeId: null }, model: testModel });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/422/);
+    expect(document.querySelector("video")).toBeNull();
+    expect(screen.getByRole("button", { name: "Generate" })).toBeInTheDocument();
+  });
+
+  it("clears a previous error once a subsequent Generate succeeds", async () => {
+    const run = vi
+      .spyOn(realGeneration, "runVideoGeneration")
+      .mockRejectedValueOnce(new Error("moderation blocked the request"))
+      .mockResolvedValueOnce({ kind: "video", url: "https://fal.media/out.mp4" });
+    const user = userEvent.setup();
+    renderNode({ prompt: "a car", history: { entries: [], activeId: null }, model: testModel });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await screen.findByRole("alert");
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(document.querySelector("video")).not.toBeNull();
+    });
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs one independent real generation per clone when generating variants", async () => {
+    const run = vi
+      .spyOn(realGeneration, "runVideoGeneration")
+      .mockResolvedValueOnce({ kind: "video", url: "https://fal.media/c1.mp4" })
+      .mockResolvedValueOnce({ kind: "video", url: "https://fal.media/c2.mp4" });
+    const user = userEvent.setup();
+    renderInCanvas([
+      {
+        id: "n1",
+        type: "videoGeneration",
+        position: { x: 0, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: { prompt: "a car", history: { entries: [], activeId: null }, model: testModel },
+      },
+    ]);
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "3");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledTimes(2);
+    });
+    expect(run).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ endpointId: "fal-ai/kling-video/v3/pro/image-to-video", prompt: "a car" }),
+    );
+    expect(run).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ endpointId: "fal-ai/kling-video/v3/pro/image-to-video", prompt: "a car" }),
+    );
+  });
+
+  it("adds no History entry for a clone whose generation fails, while its sibling still gets one", async () => {
+    vi.spyOn(realGeneration, "runVideoGeneration")
+      .mockResolvedValueOnce({ kind: "video", url: "https://fal.media/c1.mp4" })
+      .mockRejectedValueOnce(new Error("FAL error"));
+    const user = userEvent.setup();
+    renderInCanvas([
+      {
+        id: "n1",
+        type: "videoGeneration",
+        position: { x: 0, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: { prompt: "a car", history: { entries: [], activeId: null }, model: testModel },
+      },
+    ]);
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "3");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(3);
+    });
+    // Only one clone got a real output; the other's failed generation added
+    // no History entry, so it shows no video output at all.
+    await waitFor(() => {
+      expect(document.querySelectorAll("video")).toHaveLength(1);
+    });
+  });
+});
+
+// Resuming a pending generation after reload (CONTEXT.md / ADR-0009, issue
+// #39 — the video-node equivalent of #38): a Generation Node whose data
+// still holds a pendingGeneration record at mount time must pick polling
+// back up rather than leaving the node stuck showing nothing, or losing
+// track of a run FAL is billing regardless.
+describe("VideoGenerationNode resumes a pending generation on mount (issue #39)", () => {
+  const pending = {
+    requestId: "req-1",
+    statusUrl: "https://queue.fal.run/x/status",
+    responseUrl: "https://queue.fal.run/x",
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the in-progress state immediately, then lands the result in History and clears the pending record", async () => {
+    let resolveResume!: (result: { kind: "video"; url: string }) => void;
+    vi.spyOn(realGeneration, "resumeVideoGeneration").mockReturnValue(
+      new Promise((resolve) => {
+        resolveResume = resolve;
+      }),
+    );
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: {
+            prompt: "a car",
+            history: { entries: [], activeId: null },
+            model: testModel,
+            pendingGeneration: pending,
+          },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    expect(realGeneration.resumeVideoGeneration).toHaveBeenCalledWith(pending);
+    expect(screen.getAllByText(/generating/i).length).toBeGreaterThan(0);
+
+    resolveResume({ kind: "video", url: "https://fal.media/resumed.mp4" });
+
+    await waitFor(() => {
+      expect(document.querySelector("video")).not.toBeNull();
+    });
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.history.entries).toHaveLength(1);
+      expect(data.history.entries[0].output.url).toBe("https://fal.media/resumed.mp4");
+      expect(data.pendingGeneration).toBeNull();
+    });
+  });
+
+  it("clears the pending record and shows the node's normal error state when FAL no longer recognizes the request", async () => {
+    vi.spyOn(realGeneration, "resumeVideoGeneration").mockRejectedValue(
+      new Error("FAL queue status returned 404"),
+    );
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: {
+            prompt: "a car",
+            history: { entries: [], activeId: null },
+            model: testModel,
+            pendingGeneration: pending,
+          },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/404/);
+    expect(screen.queryByText(/generating/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate" })).toBeInTheDocument();
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.pendingGeneration).toBeNull();
+      expect(data.history.entries).toHaveLength(0);
+    });
+    expect(realGeneration.resumeVideoGeneration).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call resumeVideoGeneration when the node has no pending record", () => {
+    const resume = vi.spyOn(realGeneration, "resumeVideoGeneration");
+    renderNode({ prompt: "a car", history: { entries: [], activeId: null }, model: testModel });
+
+    expect(resume).not.toHaveBeenCalled();
   });
 });

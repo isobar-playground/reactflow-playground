@@ -76,7 +76,30 @@ describe("pollGenerationAction", () => {
     const { pollGenerationAction } = await import("./generation-actions");
     const result = await pollGenerationAction(pending);
 
-    expect(result).toEqual({ status: "completed", imageUrl: "https://fal.media/out.png" });
+    expect(result).toEqual({ status: "completed", mediaUrl: "https://fal.media/out.png" });
+  });
+
+  // Video Generation Node results (issue #39): FAL's video models answer
+  // with a single `video: {url}` object rather than an `images` array; the
+  // server action reports the same generic `mediaUrl` field either way.
+  it("fetches the result and reports completed with the video URL once COMPLETED", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith("/status")) {
+          return new Response(JSON.stringify({ status: "COMPLETED" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ video: { url: "https://fal.media/clip.mp4" } }), {
+          status: 200,
+        });
+      }),
+    );
+
+    const { pollGenerationAction } = await import("./generation-actions");
+    const result = await pollGenerationAction(pending);
+
+    expect(result).toEqual({ status: "completed", mediaUrl: "https://fal.media/clip.mp4" });
   });
 
   it("reports an error instead of throwing when FAL's status call fails", async () => {

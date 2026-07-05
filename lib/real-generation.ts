@@ -1,21 +1,29 @@
-// real-generation (ADR-0009): the Image Generation Node's one call to go
-// from a Model + prompt to a finished output — submits via the queue-API
-// server action, then polls the status server action every few seconds
-// until FAL reports COMPLETED (or a failure), and extracts the image URL.
+// real-generation (ADR-0009): a Generation Node's one call to go from a
+// Model + prompt to a finished output — submits via the queue-API server
+// action, then polls the status server action every few seconds until FAL
+// reports COMPLETED (or a failure), and extracts the resulting asset's URL.
+//
+// Issue #39 generalizes this from the Image Generation Node's original
+// shape to a shared transport for both node kinds (ADR-0009: "one transport
+// for both node kinds") — submit/poll/extract are identical for image and
+// video Models, they only differ in which placeholder `kind` the finished
+// output is tagged with. `runImageGeneration`/`resumeImageGeneration` and
+// `runVideoGeneration`/`resumeVideoGeneration` are thin, kind-specific
+// wrappers over the same internal `pollUntilSettled` loop.
 //
 // Kept deliberately at the same call shape as the old lib/generation-mock.ts
-// (`() => Promise<{kind: "image", url}>`) so the node component's History
-// entry shape (lib/node-history.ts) needs no change, and so existing node
-// tests only need to swap which function they mock.
+// (`() => Promise<{kind, url}>`) so the node components' History entry shape
+// (lib/node-history.ts) needs no change, and so existing node tests only
+// need to swap which function they mock.
 
 import {
   submitGenerationAction,
   pollGenerationAction,
   type PendingGeneration,
 } from "@/app/generation-actions";
-import type { ImagePlaceholderResult } from "./generation-mock";
+import type { ImagePlaceholderResult, VideoPlaceholderResult } from "./node-history";
 
-export interface RunImageGenerationInput {
+export interface RunGenerationInput {
   endpointId: string;
   /** The Resolved Prompt (CONTEXT.md) — never the raw local prompt field alone. */
   prompt: string;
@@ -23,7 +31,10 @@ export interface RunImageGenerationInput {
   negativePrompt?: string;
 }
 
-export interface RunImageGenerationOptions {
+export type RunImageGenerationInput = RunGenerationInput;
+export type RunVideoGenerationInput = RunGenerationInput;
+
+export interface RunGenerationOptions {
   /** Called once FAL returns the pending record, so the caller can persist
    * it into the node's `data` (ADR-0009) before polling begins. */
   onPending?: (pending: PendingGeneration) => void;
@@ -33,25 +44,31 @@ export interface RunImageGenerationOptions {
   wait?: (ms: number) => Promise<void>;
 }
 
+export type RunImageGenerationOptions = RunGenerationOptions;
+export type RunVideoGenerationOptions = RunGenerationOptions;
+
 const DEFAULT_POLL_INTERVAL_MS = 3000;
 
 function defaultWait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function runImageGeneration(
-  input: RunImageGenerationInput,
-  options: RunImageGenerationOptions = {},
-): Promise<ImagePlaceholderResult> {
+function buildRequestBody(input: RunGenerationInput): Record<string, unknown> {
   const body: Record<string, unknown> = { prompt: input.prompt };
   if (input.negativePrompt) {
     body.negative_prompt = input.negativePrompt;
   }
+  return body;
+}
 
-  const pending = await submitGenerationAction(input.endpointId, body);
+export async function runImageGeneration(
+  input: RunImageGenerationInput,
+  options: RunImageGenerationOptions = {},
+): Promise<ImagePlaceholderResult> {
+  const pending = await submitGenerationAction(input.endpointId, buildRequestBody(input));
   options.onPending?.(pending);
 
-  return pollUntilSettled(pending, options);
+  return pollUntilSettled(pending, options, "image");
 }
 
 // Resumes polling an already-submitted pending record (issue #38 / ADR-0009)
@@ -67,13 +84,39 @@ export async function resumeImageGeneration(
   pending: PendingGeneration,
   options: RunImageGenerationOptions = {},
 ): Promise<ImagePlaceholderResult> {
-  return pollUntilSettled(pending, options);
+  return pollUntilSettled(pending, options, "image");
 }
 
-async function pollUntilSettled(
+// Video Generation Node's real generation (issue #39): identical submit/poll
+// mechanics to the image path above — only the resulting placeholder's
+// `kind` differs, and FAL's video Models answer with a `video`/`videos`
+// result shape (lib/fal-generation.ts's getGenerationResult already covers
+// both).
+export async function runVideoGeneration(
+  input: RunVideoGenerationInput,
+  options: RunVideoGenerationOptions = {},
+): Promise<VideoPlaceholderResult> {
+  const pending = await submitGenerationAction(input.endpointId, buildRequestBody(input));
+  options.onPending?.(pending);
+
+  return pollUntilSettled(pending, options, "video");
+}
+
+// Resumes polling an already-submitted video generation after a reload
+// (issue #38's treatment, extended to video by issue #39) — mirrors
+// resumeImageGeneration exactly, just entered with a video pending record.
+export async function resumeVideoGeneration(
   pending: PendingGeneration,
-  options: RunImageGenerationOptions,
-): Promise<ImagePlaceholderResult> {
+  options: RunVideoGenerationOptions = {},
+): Promise<VideoPlaceholderResult> {
+  return pollUntilSettled(pending, options, "video");
+}
+
+async function pollUntilSettled<K extends "image" | "video">(
+  pending: PendingGeneration,
+  options: RunGenerationOptions,
+  kind: K,
+): Promise<{ kind: K; url: string }> {
   const wait = options.wait ?? defaultWait;
   const intervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 
@@ -86,5 +129,5 @@ async function pollUntilSettled(
   if (outcome.status === "error") {
     throw new Error(outcome.message);
   }
-  return { kind: "image", url: outcome.imageUrl };
+  return { kind, url: outcome.mediaUrl };
 }

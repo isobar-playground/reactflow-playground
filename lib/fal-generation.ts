@@ -91,15 +91,19 @@ export async function getGenerationStatus(
 }
 
 export interface GenerationOutputResult {
-  imageUrl: string;
+  mediaUrl: string;
 }
 
-// FAL's result shapes vary by model: an array of images (`images:
-// [{url}, ...]`, most text-to-image/image-to-image models) or a single
-// `image: {url}` object. Only the first image is taken (CONTEXT.md's
-// Generate: scalar params like `num_images` stay unsurfaced, so the first
-// returned asset is what the node keeps).
-function extractImageUrl(data: unknown): string | undefined {
+// FAL's result shapes vary by model and by output modality (issue #39: the
+// Image and Video Generation Nodes share this one extraction function, per
+// ADR-0009's "one transport for both node kinds"): an array of images
+// (`images: [{url}, ...]`, most text-to-image/image-to-image models), a
+// single `image: {url}` object, a single `video: {url}` object (most
+// text-to-video/image-to-video models), or a `videos: [{url}, ...]` array.
+// Only the first asset is taken (CONTEXT.md's Generate: scalar params like
+// `num_images` stay unsurfaced, so the first returned asset is what the node
+// keeps).
+function extractMediaUrl(data: unknown): string | undefined {
   if (typeof data !== "object" || data === null) return undefined;
   const record = data as Record<string, unknown>;
 
@@ -114,11 +118,23 @@ function extractImageUrl(data: unknown): string | undefined {
     return (image as Record<string, unknown>).url as string;
   }
 
+  const video = record.video;
+  if (video && typeof video === "object" && typeof (video as Record<string, unknown>).url === "string") {
+    return (video as Record<string, unknown>).url as string;
+  }
+
+  const videos = record.videos;
+  if (Array.isArray(videos) && videos.length > 0) {
+    const first = videos[0] as Record<string, unknown> | undefined;
+    if (first && typeof first.url === "string") return first.url;
+  }
+
   return undefined;
 }
 
 // Fetches the queue's own `response_url` (used verbatim, per ADR-0009) once
-// status is COMPLETED, and extracts the first generated image URL.
+// status is COMPLETED, and extracts the first generated asset's URL —
+// image or video, whichever the Model's output shape contains.
 export async function getGenerationResult(
   responseUrl: string,
   options: FalFetchOptions = {},
@@ -130,9 +146,9 @@ export async function getGenerationResult(
     throw new Error(`FAL queue result returned ${response.status}`);
   }
   const data = await response.json();
-  const imageUrl = extractImageUrl(data);
-  if (!imageUrl) {
-    throw new Error("FAL result contained no image URL");
+  const mediaUrl = extractMediaUrl(data);
+  if (!mediaUrl) {
+    throw new Error("FAL result contained no media URL");
   }
-  return { imageUrl };
+  return { mediaUrl };
 }

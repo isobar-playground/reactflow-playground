@@ -27,13 +27,15 @@ export async function submitGenerationAction(
 
 export type GenerationPollResult =
   | { status: "pending" }
-  | { status: "completed"; imageUrl: string }
+  | { status: "completed"; mediaUrl: string }
   | { status: "error"; message: string };
 
 // One poll of a pending generation (CONTEXT.md / ADR-0009): still queued or
-// running -> "pending"; done -> fetches the result and extracts the image;
-// any FAL error (bad status code, unrecognized result shape) surfaces as
-// "error" rather than throwing, so the client can show it without a crash.
+// running -> "pending"; done -> fetches the result and extracts the
+// generated asset's URL (image or video, per issue #39 — the queue API is
+// one shared transport for both node kinds); any FAL error (bad status
+// code, unrecognized result shape) surfaces as "error" rather than
+// throwing, so the client can show it without a crash.
 export async function pollGenerationAction(
   pending: PendingGeneration,
 ): Promise<GenerationPollResult> {
@@ -41,8 +43,8 @@ export async function pollGenerationAction(
     const { status } = await getGenerationStatus(pending.statusUrl);
     if (status !== "COMPLETED") return { status: "pending" };
 
-    const { imageUrl } = await getGenerationResult(pending.responseUrl);
-    return { status: "completed", imageUrl };
+    const { mediaUrl } = await getGenerationResult(pending.responseUrl);
+    return { status: "completed", mediaUrl };
   } catch (error) {
     return {
       status: "error",

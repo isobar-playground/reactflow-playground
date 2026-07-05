@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Position,
@@ -14,7 +14,8 @@ import {
 import { HandleBadge } from "@/components/nodes/handle-badge";
 import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
 import { useNodeActions } from "@/components/nodes/use-node-actions";
-import { generateVideoPlaceholder } from "@/lib/generation-mock";
+import { runVideoGeneration, resumeVideoGeneration } from "@/lib/real-generation";
+import type { PendingGeneration } from "@/app/generation-actions";
 import {
   appendEntry,
   setActiveEntry,
@@ -37,6 +38,12 @@ export type VideoGenerationNodeData = {
   history: NodeHistory;
   model?: SelectedModel | null;
   negativePrompt?: string;
+  // The in-flight FAL queue request (ADR-0009, issue #39 mirroring #36):
+  // request id + the status/response URLs returned verbatim by the submit
+  // call. Persisted into `data` so a reload can resume polling it (the
+  // mount effect below, mirroring #38). Cleared once the generation
+  // finishes, whether it succeeds or errors.
+  pendingGeneration?: PendingGeneration | null;
 };
 
 export type VideoGenerationNodeType = Node<VideoGenerationNodeData, "videoGeneration">;
@@ -61,6 +68,10 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
   const prompt = data.prompt;
   const history = data.history;
   const [isGenerating, setIsGenerating] = useState(false);
+  // FAL failure (CONTEXT.md / ADR-0009, issue #39): any error from the real
+  // generation surfaces as a message in the node and adds no History entry.
+  // Transient UI state, like isGenerating (issue #16) — not persisted to data.
+  const [generationError, setGenerationError] = useState<string | null>(null);
   // Variant counter (CONTEXT.md / issue #12): above one, Generate clones this
   // node into that many independent nodes instead of appending to its own
   // History. Resets to 1 after cloning. Kept as the raw input string (rather
@@ -159,6 +170,48 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
     updateNodeInternals(id);
   }, [selectedModel?.endpointId, inputHandleLayout.length, id, updateNodeInternals]);
 
+  // Resume a pending generation after reload (CONTEXT.md / ADR-0009, issue
+  // #39 mirroring #38): data.pendingGeneration (written at submit time)
+  // surviving to mount means FAL is still running — or has already finished
+  // — a run this component lost track of client-side. FAL bills it either
+  // way, so on mount this resumes polling that exact record (never
+  // re-submits) instead of leaving the node stuck showing nothing. Success
+  // lands the output in History exactly like a fresh Generate; any failure
+  // — including FAL no longer recognizing a stale record — surfaces as the
+  // node's normal error state rather than polling forever. Either way the
+  // record is cleared from data once the run settles.
+  //
+  // Guarded by a ref (rather than skipping via the effect's own cleanup) so
+  // that clearing pendingGeneration from *this same* resumption — which
+  // re-runs the effect, since it's keyed on data.pendingGeneration below —
+  // doesn't race its own in-flight promise chain: a cleanup-based `cancelled`
+  // flag would flip true the instant the success/failure handler nulls out
+  // pendingGeneration, before the chain's own `finally` has run, silently
+  // leaving isGenerating stuck true.
+  const resumedRequestIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const pending = data.pendingGeneration;
+    if (!pending || resumedRequestIds.current.has(pending.requestId)) return;
+    resumedRequestIds.current.add(pending.requestId);
+    setIsGenerating(true);
+    setGenerationError(null);
+    resumeVideoGeneration(pending)
+      .then((result) => {
+        updateNodeData(id, {
+          history: appendEntry(history, { id: crypto.randomUUID(), prompt, output: result }),
+          pendingGeneration: null,
+        });
+      })
+      .catch((error) => {
+        setGenerationError(error instanceof Error ? error.message : "Generation failed");
+        updateNodeData(id, { pendingGeneration: null });
+      })
+      .finally(() => {
+        setIsGenerating(false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.pendingGeneration]);
+
   // Variant cloning (CONTEXT.md / issue #12): when the counter is above one,
   // Generate adds (count - 1) sibling clones beside this node instead of
   // appending to its own History — the counter is the total number of
@@ -171,7 +224,13 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
   // ADR-0002: getNode(id) already returns the live `data.prompt` — the
   // prompt field writes through on every keystroke — so no manual merge of
   // the local prompt into the cloned node's data is needed here.
+  // Each clone runs its own independent real FAL submission (CONTEXT.md /
+  // ADR-0009's Variant / Clone) — never a shared or copied result. A clone
+  // whose generation errors gets no History entry (CONTEXT.md), same as the
+  // single-generation path below, but doesn't block its siblings. Mirrors
+  // components/nodes/image-generation-node.tsx's handleGenerateVariants.
   async function handleGenerateVariants(count: number) {
+    if (!selectedModel) return;
     setIsGenerating(true);
     const node = getNode(id);
     if (!node) {
@@ -180,18 +239,33 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
     }
     const { nodes: clones, edges: clonedEdges } = cloneVariants(node, getEdges(), count - 1);
 
-    const generated = await Promise.all(clones.map(() => generateVideoPlaceholder()));
-    const clonesWithOutput = clones.map((clone, index) => ({
-      ...clone,
-      data: {
-        ...clone.data,
-        history: appendEntry(clone.data.history as NodeHistory, {
-          id: crypto.randomUUID(),
-          prompt,
-          output: generated[index],
-        }),
-      },
-    }));
+    const negativePrompt =
+      selectedModel.hasNegativePrompt && data.negativePrompt ? data.negativePrompt : undefined;
+    const generated = await Promise.all(
+      clones.map(() =>
+        runVideoGeneration({
+          endpointId: selectedModel.endpointId,
+          prompt: resolvedPromptText,
+          negativePrompt,
+        }).catch(() => null),
+      ),
+    );
+    const clonesWithOutput = clones.map((clone, index) => {
+      const result = generated[index];
+      return {
+        ...clone,
+        data: {
+          ...clone.data,
+          history: result
+            ? appendEntry(clone.data.history as NodeHistory, {
+                id: crypto.randomUUID(),
+                prompt,
+                output: result,
+              })
+            : clone.data.history,
+        },
+      };
+    });
 
     addNodes(clonesWithOutput);
     addEdges(clonedEdges);
@@ -199,21 +273,41 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
     setIsGenerating(false);
   }
 
-  // Every Generate/Regenerate appends a new History entry — even with an
-  // unchanged prompt — and that entry becomes the Active Output (CONTEXT.md).
-  // ADR-0002 / issue #16: written through to data.history so it survives
-  // reload and stays visible to downstream consumers of the Active Output.
+  // Every Generate/Regenerate submits a real request to the selected Model's
+  // FAL queue endpoint (CONTEXT.md / ADR-0009), sending the Resolved Prompt
+  // as `prompt` and the negative-prompt config field when the Model supports
+  // it. The returned pending record is written through to
+  // data.pendingGeneration as soon as FAL accepts the submission (enables
+  // resuming polling after a reload — see the mount effect above) and
+  // cleared once the run settles. On success, a new History entry becomes
+  // the Active Output (ADR-0002 / issue #16); on any FAL failure, an error
+  // message is shown instead and no History entry is added. Mirrors
+  // components/nodes/image-generation-node.tsx's handleGenerate.
   async function handleGenerate() {
     if (variantCount > 1) {
       await handleGenerateVariants(variantCount);
       return;
     }
+    if (!selectedModel) return;
     setIsGenerating(true);
-    const result = await generateVideoPlaceholder();
-    updateNodeData(id, {
-      history: appendEntry(history, { id: crypto.randomUUID(), prompt, output: result }),
-    });
-    setIsGenerating(false);
+    setGenerationError(null);
+    try {
+      const negativePrompt =
+        selectedModel.hasNegativePrompt && data.negativePrompt ? data.negativePrompt : undefined;
+      const result = await runVideoGeneration(
+        { endpointId: selectedModel.endpointId, prompt: resolvedPromptText, negativePrompt },
+        { onPending: (pending) => updateNodeData(id, { pendingGeneration: pending }) },
+      );
+      updateNodeData(id, {
+        history: appendEntry(history, { id: crypto.randomUUID(), prompt, output: result }),
+        pendingGeneration: null,
+      });
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : "Generation failed");
+      updateNodeData(id, { pendingGeneration: null });
+    } finally {
+      setIsGenerating(false);
+    }
   }
 
   // Selecting a History thumbnail sets the Active Output and restores that
@@ -395,11 +489,19 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
         <p className="mb-3 text-xs text-muted-foreground">Select a model to configure this node.</p>
       )}
 
+      {/* FAL failure (CONTEXT.md / ADR-0009, issue #39): shown instead of a
+          History entry — no entry is ever added for a failed generation. */}
+      {generationError && (
+        <p role="alert" className="mb-3 text-xs text-destructive">
+          {generationError}
+        </p>
+      )}
+
       <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={handleGenerate}
-          disabled={isGenerating}
+          disabled={isGenerating || !selectedModel}
           className="nodrag flex-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
         >
           {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
