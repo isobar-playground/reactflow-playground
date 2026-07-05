@@ -15,7 +15,7 @@ import { HandleBadge } from "@/components/nodes/handle-badge";
 import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
 import { useNodeActions } from "@/components/nodes/use-node-actions";
 import { runImageGeneration, resumeImageGeneration } from "@/lib/real-generation";
-import type { PendingGeneration } from "@/app/generation-actions";
+import type { PendingGeneration } from "@/lib/fal-generation";
 import {
   appendEntry,
   setActiveEntry,

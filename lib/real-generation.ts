@@ -16,11 +16,8 @@
 // (lib/node-history.ts) needs no change, and so existing node tests only
 // need to swap which function they mock.
 
-import {
-  submitGenerationAction,
-  pollGenerationAction,
-  type PendingGeneration,
-} from "@/app/generation-actions";
+import { submitGenerationAction, pollGenerationAction } from "@/app/generation-actions";
+import type { PendingGeneration } from "@/lib/fal-generation";
 import type { ImagePlaceholderResult, VideoPlaceholderResult } from "./node-history";
 import { buildGenerationPayload, type MediaHandleConnection } from "./generation-payload";
 

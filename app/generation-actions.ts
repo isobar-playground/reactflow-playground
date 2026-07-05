@@ -15,8 +15,6 @@ import {
   type LocalAssetRef,
 } from "@/lib/fal-generation";
 
-export type { PendingGeneration, LocalAssetRef };
-
 // Connected media inputs (issue #40 / ADR-0009): the local-filesystem Asset
 // Library backend (ADR-0005) serves assets from a relative `/uploads/...`
 // path, which a plain server-side `fetch` can't resolve on its own — unlike
