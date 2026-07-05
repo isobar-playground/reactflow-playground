@@ -18,9 +18,13 @@ import { StaticTextReferenceNode } from "./static-text-reference-node";
 import { StaticMediaReferenceNode } from "./static-media-reference-node";
 import type { Model } from "@/lib/fal-models";
 
-vi.mock("@/app/models-actions", () => ({
-  approvedModelsForKind: vi.fn().mockResolvedValue([]),
-}));
+vi.mock("@/app/models-actions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/app/models-actions")>();
+  return {
+    ...actual,
+    approvedModelsForKind: vi.fn().mockResolvedValue([]),
+  };
+});
 
 const nodeTypes = {
   videoGeneration: VideoGenerationNode,

@@ -15,9 +15,13 @@ vi.mock("@/app/canvas-actions", () => ({
   renameCanvasAction: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/app/models-actions", () => ({
-  approvedModelsForKind: vi.fn().mockResolvedValue([]),
-}));
+vi.mock("@/app/models-actions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/app/models-actions")>();
+  return {
+    ...actual,
+    approvedModelsForKind: vi.fn().mockResolvedValue([]),
+  };
+});
 
 function makeCanvas(graph: Record<string, unknown> = {}): Canvas {
   return {

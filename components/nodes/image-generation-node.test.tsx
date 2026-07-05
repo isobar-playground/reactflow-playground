@@ -20,9 +20,13 @@ import type { Model } from "@/lib/fal-models";
 import nanoBanana2EditSchema from "@/lib/__fixtures__/nano-banana-2-edit.json";
 import fluxSchnellSchema from "@/lib/__fixtures__/flux-schnell.json";
 
-vi.mock("@/app/models-actions", () => ({
-  approvedModelsForKind: vi.fn().mockResolvedValue([]),
-}));
+vi.mock("@/app/models-actions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/app/models-actions")>();
+  return {
+    ...actual,
+    approvedModelsForKind: vi.fn().mockResolvedValue([]),
+  };
+});
 
 const nodeTypes = {
   imageGeneration: ImageGenerationNode,

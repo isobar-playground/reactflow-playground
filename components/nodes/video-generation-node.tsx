@@ -24,9 +24,9 @@ import {
 import { resolvedPrompt } from "@/lib/resolved-prompt";
 import { videoGenerationMode, videoGenerationModeLabel, modelCategoryLabel } from "@/lib/generation-mode";
 import { cloneVariants } from "@/lib/variant-clone";
-import { approvedModelsForKind } from "@/app/models-actions";
+import { approvedModelsForKind, fetchModelSchemaAction } from "@/app/models-actions";
 import type { Model } from "@/lib/fal-models";
-import { fetchModelInputSchema, deriveInputHandles, type ResolvedHandle } from "@/lib/fal-schema";
+import type { ResolvedHandle } from "@/lib/fal-schema";
 import { reconcileEdges, resolveEdgeDataTypeFromNodes } from "@/lib/edge-reconcile";
 import type { StaticTextReferenceNodeData } from "@/components/nodes/static-text-reference-node";
 import type { SelectedModel } from "@/components/nodes/image-generation-node";
@@ -335,8 +335,7 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
                 setEdges((edges) => reconcileEdges(edges, id, [], resolveEdgeDataTypeFromNodes(getNode)));
                 return;
               }
-              void fetchModelInputSchema(chosen.endpointId).then((schema) => {
-                const { handles, hasNegativePrompt } = deriveInputHandles(schema, chosen.endpointId);
+              void fetchModelSchemaAction(chosen.endpointId).then(({ handles, hasNegativePrompt }) => {
                 updateNodeData(id, {
                   model: {
                     endpointId: chosen.endpointId,

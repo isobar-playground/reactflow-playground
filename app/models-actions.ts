@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { approveModel, unapproveModel, listApprovedEndpointIds } from "@/lib/model-approvals";
 import { listModels, type Model } from "@/lib/fal-models";
 import { modelsForKind } from "@/lib/model-filter";
+import { fetchModelInputSchema, deriveInputHandles, type DeriveInputHandlesResult } from "@/lib/fal-schema";
 
 export async function approveModelAction(endpointId: string) {
   await approveModel(endpointId);
@@ -29,4 +30,14 @@ export async function approvedModelsForKind(kind: "image" | "video"): Promise<Mo
     return [];
   }
   return modelsForKind(models, kind).filter((m) => approvedIds.includes(m.endpointId));
+}
+
+// Model-select handle derivation (ADR-0007 / ADR-0008 / issue #30): fetches
+// one endpoint's FAL OpenAPI document and derives its Input Handles. Runs
+// server-side because FAL's openapi.json endpoint isn't reachable via a
+// browser fetch (no CORS) — the Model picker's onChange calls this action
+// instead of lib/fal-schema.ts directly.
+export async function fetchModelSchemaAction(endpointId: string): Promise<DeriveInputHandlesResult> {
+  const schema = await fetchModelInputSchema(endpointId);
+  return deriveInputHandles(schema, endpointId);
 }
