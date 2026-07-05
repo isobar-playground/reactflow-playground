@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { approveModelAction, unapproveModelAction } from "@/app/models-actions";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { approveModelAction, fetchCatalogPricingAction, unapproveModelAction } from "@/app/models-actions";
 import {
   SURFACED_CATEGORIES,
   type Model,
@@ -13,7 +13,14 @@ import {
   type SortOrder,
 } from "@/lib/model-filter";
 import { familyOptions } from "@/lib/model-family";
-import { formatUnitPrice } from "@/lib/fal-pricing";
+import { formatUnitPrice, type ModelPricing } from "@/lib/fal-pricing";
+
+// Lazy Unit Price fetch cap (ADR-0010 revision): FAL's pricing endpoint caps
+// ~30-50 repeated `endpoint_id` params per call (lib/fal-pricing.ts's
+// CHUNK_SIZE), and its rate limiter is aggressive enough that even one
+// further chunk often 429s. Auto-fetching stays within a single chunk;
+// wider result sets just show no price until the user narrows their search.
+const MAX_AUTO_PRICING_MODELS = 30;
 
 // The `/models` page: browses the Model Catalog fetched live from FAL
 // (ADR-0006) and joins it against the app's approvals. Each Model carries an
@@ -47,6 +54,33 @@ export function ModelsBrowser({
       filterModels(models, { query, category, family, approval, approvedIds, sort }),
     [models, query, category, family, approval, approvedIds, sort],
   );
+
+  // Lazy Unit Price fetch (ADR-0010 revision, issue #45 follow-up): priced
+  // per visible/filtered set instead of the whole catalog up front — see
+  // MAX_AUTO_PRICING_MODELS. `requestedIds` tracks endpoint ids already
+  // fetched (successfully or not) so narrowing back to a previously-seen
+  // Model never re-fetches it.
+  const [pricingByEndpoint, setPricingByEndpoint] = useState<Record<string, ModelPricing>>({});
+  const requestedIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (visible.length > MAX_AUTO_PRICING_MODELS) return;
+
+    const missingIds = visible
+      .map((m) => m.endpointId)
+      .filter((id) => !requestedIds.current.has(id));
+    if (missingIds.length === 0) return;
+
+    for (const id of missingIds) requestedIds.current.add(id);
+
+    let cancelled = false;
+    void fetchCatalogPricingAction(missingIds).then((resolved) => {
+      if (!cancelled) setPricingByEndpoint((prev) => ({ ...prev, ...resolved }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible]);
 
   // The catalog itself being empty (FAL returned nothing) is distinct from a
   // search/filter matching nothing — both show a message, but only the latter
@@ -138,24 +172,41 @@ export function ModelsBrowser({
           No models match your search or filters.
         </p>
       ) : (
-        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {visible.map((model) => (
-            <ModelCard
-              key={model.endpointId}
-              model={model}
-              approved={approvedSet.has(model.endpointId)}
-            />
-          ))}
-        </ul>
+        <>
+          {visible.length > MAX_AUTO_PRICING_MODELS && (
+            <p className="text-xs text-muted-foreground">
+              Narrow your search or filters to see prices for these {visible.length} models.
+            </p>
+          )}
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {visible.map((model) => (
+              <ModelCard
+                key={model.endpointId}
+                model={model}
+                approved={approvedSet.has(model.endpointId)}
+                pricing={pricingByEndpoint[model.endpointId]}
+              />
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );
 }
 
-function ModelCard({ model, approved }: { model: Model; approved: boolean }) {
+function ModelCard({
+  model,
+  approved,
+  pricing,
+}: {
+  model: Model;
+  approved: boolean;
+  pricing?: ModelPricing;
+}) {
   // Unit Price (CONTEXT.md / ADR-0010 / issue #45): rendered verbatim when
-  // resolvable, nothing when absent (never fetched, 429, outage).
-  const unitPrice = formatUnitPrice(model.pricing);
+  // resolvable, nothing when absent (never fetched, 429, outage, or above
+  // MAX_AUTO_PRICING_MODELS).
+  const unitPrice = formatUnitPrice(pricing);
   // Optimistic toggle: flip locally at once, then persist via the action
   // (mirrors asset-library-browser's useTransition). revalidatePath in the
   // action reconciles the server-rendered state on the next paint.

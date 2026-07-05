@@ -8,8 +8,6 @@
 // with a ~1h TTL so a rarely-opened settings page doesn't re-paginate all of
 // FAL every visit. A test hook resets the cache (as with `resetDbForTests`).
 
-import { fetchPricingBatch, type ModelPricing } from "./fal-pricing";
-
 // A FAL inference endpoint a Generation Node can call (CONTEXT.md). Its
 // `category` maps 1:1 onto a generation Mode — only these five are surfaced.
 export interface Model {
@@ -22,10 +20,6 @@ export interface Model {
   // FAL's `metadata.date` — when the model was added/published. ISO-8601, so
   // it sorts chronologically as a plain string. May be absent on old entries.
   addedAt?: string;
-  // The Model's raw Unit Price (CONTEXT.md / ADR-0010 / issue #45), joined
-  // best-effort from FAL's pricing endpoint. Absent when unresolved (never
-  // fetched, 429, outage) — a Model simply shows no price, never a fallback.
-  pricing?: ModelPricing | null;
 }
 
 // The five categories that map onto a generation Mode. FAL's other categories
@@ -88,22 +82,11 @@ export async function listModels(options: ListModelsOptions = {}): Promise<Model
   );
   const models = perCategory.flat();
 
-  // Best-effort Unit Price join (issue #45 / ADR-0010): fetchPricingBatch
-  // never throws (its own chunk-level try/catch swallows failures), so a
-  // total pricing outage simply leaves every Model's `pricing` unset rather
-  // than aborting catalog assembly — the catalog still renders with families
-  // and approvals (mirrors ADR-0006's FAL-unreachable stance). Only
-  // successfully-fetched prices end up in the map, and only the
-  // pricing-joined list is cached, so transient 429s self-heal next window.
-  const pricingById = await fetchPricingBatch(
-    models.map((m) => m.endpointId),
-    { fetchImpl },
-  );
-  for (const model of models) {
-    const pricing = pricingById.get(model.endpointId);
-    if (pricing) model.pricing = pricing;
-  }
-
+  // Unit Price is deliberately NOT joined here (ADR-0010 revision): FAL's
+  // pricing endpoint can't absorb pricing all ~1000+ Models up front (chunked
+  // and throttled still trips 429s across dozens of sequential chunks). The
+  // /models catalog fetches it lazily instead, per its visible/filtered set
+  // (app/models-actions.ts's fetchCatalogPricingAction).
   cache = { models, expiresAt: Date.now() + CACHE_TTL_MS };
   return models;
 }

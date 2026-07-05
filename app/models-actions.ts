@@ -5,7 +5,7 @@ import { approveModel, unapproveModel, listApprovedEndpointIds } from "@/lib/mod
 import { listModels, type Model } from "@/lib/fal-models";
 import { modelsForKind } from "@/lib/model-filter";
 import { fetchModelInputSchema, deriveInputHandles, type DeriveInputHandlesResult } from "@/lib/fal-schema";
-import { fetchModelPricing, type ModelPricing } from "@/lib/fal-pricing";
+import { fetchModelPricing, fetchPricingBatch, type ModelPricing } from "@/lib/fal-pricing";
 
 export async function approveModelAction(endpointId: string) {
   await approveModel(endpointId);
@@ -53,4 +53,19 @@ export async function fetchModelSchemaAction(endpointId: string): Promise<ModelS
     fetchModelPricing(endpointId),
   ]);
   return { ...schema, pricing };
+}
+
+// Lazy Unit Price fetch for the /models catalog (ADR-0010 revision): the
+// catalog is ~1000+ Models, and FAL's pricing endpoint's rate limit can't
+// absorb pricing every Model up front (chunked-and-throttled still trips
+// 429s across ~35 sequential chunks). Instead, ModelsBrowser calls this once
+// per change to its visible (filtered) set, so a typical search/filter only
+// prices a handful of Models rather than the whole catalog. Returns a plain
+// object (not the Map fetchPricingBatch uses internally) since server action
+// return values must be serializable across the RSC boundary.
+export async function fetchCatalogPricingAction(
+  endpointIds: string[],
+): Promise<Record<string, ModelPricing>> {
+  const pricingById = await fetchPricingBatch(endpointIds);
+  return Object.fromEntries(pricingById);
 }

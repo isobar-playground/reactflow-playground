@@ -1,20 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ModelsBrowser } from "./models-browser";
 import type { Model } from "@/lib/fal-models";
 
 const approveModelAction = vi.fn();
 const unapproveModelAction = vi.fn();
+const fetchCatalogPricingAction = vi.fn();
 
 vi.mock("@/app/models-actions", () => ({
   approveModelAction: (endpointId: string) => approveModelAction(endpointId),
   unapproveModelAction: (endpointId: string) => unapproveModelAction(endpointId),
+  fetchCatalogPricingAction: (endpointIds: string[]) => fetchCatalogPricingAction(endpointIds),
 }));
 
 beforeEach(() => {
   approveModelAction.mockReset();
   unapproveModelAction.mockReset();
+  fetchCatalogPricingAction.mockReset().mockResolvedValue({});
 });
 
 function model(overrides: Partial<Model> = {}): Model {
@@ -227,20 +230,33 @@ describe("ModelsBrowser (search and filters)", () => {
     expect(screen.getByText("One Off Model")).toBeInTheDocument();
   });
 
-  it("shows a Model's Unit Price on its card when present", () => {
-    const priced = model({
-      pricing: { unitPrice: 0.14, unit: "seconds", currency: "USD" },
+  it("lazily fetches and shows a Model's Unit Price once resolved", async () => {
+    fetchCatalogPricingAction.mockResolvedValue({
+      "fal-ai/flux/dev": { unitPrice: 0.14, unit: "seconds", currency: "USD" },
     });
 
-    render(<ModelsBrowser models={[priced]} />);
+    render(<ModelsBrowser models={[model()]} />);
 
-    expect(screen.getByText("$0.14 / second")).toBeInTheDocument();
+    expect(await screen.findByText("$0.14 / second")).toBeInTheDocument();
+    expect(fetchCatalogPricingAction).toHaveBeenCalledWith(["fal-ai/flux/dev"]);
   });
 
-  it("shows no Unit Price on a Model's card when pricing is absent", () => {
-    render(<ModelsBrowser models={[model({ pricing: undefined })]} />);
+  it("shows no Unit Price on a Model's card when the pricing fetch resolves nothing for it", async () => {
+    render(<ModelsBrowser models={[model()]} />);
 
+    await waitFor(() => expect(fetchCatalogPricingAction).toHaveBeenCalled());
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
+  });
+
+  it("skips the pricing fetch (and shows a hint) when more models are visible than the auto-fetch cap", () => {
+    const many = Array.from({ length: 31 }, (_, i) =>
+      model({ endpointId: `fal-ai/model-${i}`, name: `Model ${i}` }),
+    );
+
+    render(<ModelsBrowser models={many} />);
+
+    expect(fetchCatalogPricingAction).not.toHaveBeenCalled();
+    expect(screen.getByText(/narrow your search/i)).toBeInTheDocument();
   });
 
   it("orders newest-added first by default and flips when sorted oldest", async () => {

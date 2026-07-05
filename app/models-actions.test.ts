@@ -123,3 +123,28 @@ describe("models-actions — fetchModelSchemaAction pricing snapshot (issue #37)
     expect(result.pricing).toBeNull();
   });
 });
+
+// fetchCatalogPricingAction (ADR-0010 revision): the /models catalog's lazy,
+// per-visible-set pricing fetch — a thin server action over
+// fal-pricing.ts's already-throttled fetchPricingBatch, since that endpoint
+// needs FAL_KEY and isn't reachable from the browser.
+describe("models-actions — fetchCatalogPricingAction", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns a plain object keyed by endpoint id for resolved prices", async () => {
+    vi.spyOn(falPricing, "fetchPricingBatch").mockResolvedValue(
+      new Map([
+        ["fal-ai/flux/dev", { unitPrice: 0.04, unit: "images", currency: "USD" }],
+      ]),
+    );
+
+    const { fetchCatalogPricingAction } = await import("./models-actions");
+    const result = await fetchCatalogPricingAction(["fal-ai/flux/dev", "fal-ai/unresolved"]);
+
+    expect(result).toEqual({
+      "fal-ai/flux/dev": { unitPrice: 0.04, unit: "images", currency: "USD" },
+    });
+  });
+});
