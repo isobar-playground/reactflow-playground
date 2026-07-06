@@ -522,11 +522,27 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
   });
 
   it("clones (count - 1) siblings beside the node when the counter is above one and Generate is clicked", async () => {
+    // The original runs its own generation (issue #47); each clone's run is
+    // only *submitted* by the original (issue #48 / ADR-0011) and polled to
+    // completion by the clone's own resume machinery.
     const generate = vi
       .spyOn(realGeneration, "runImageGeneration")
-      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c1/768/768" })
-      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c2/768/768" })
-      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c3/768/768" });
+      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c1/768/768" });
+    let submissions = 0;
+    const submit = vi
+      .spyOn(realGeneration, "submitImageGeneration")
+      .mockImplementation(async () => {
+        submissions += 1;
+        return {
+          requestId: `req-${submissions}`,
+          statusUrl: `https://queue.fal.run/x/status/${submissions}`,
+          responseUrl: `https://queue.fal.run/x/${submissions}`,
+        };
+      });
+    vi.spyOn(realGeneration, "resumeImageGeneration").mockImplementation(async (pending) => ({
+      kind: "image",
+      url: `https://picsum.photos/seed/c${pending.requestId === "req-1" ? 2 : 3}/768/768`,
+    }));
     const user = userEvent.setup();
     renderInCanvas([
       {
@@ -546,9 +562,11 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
 
     // A counter of 3 means 3 variants *total* — this node counts as one of
     // them (and runs its own generation, issue #47), so only 2 new siblings
-    // are cloned beside it, and 3 generations run in all.
+    // are cloned beside it, and 3 generations run in all: the original's own
+    // full run plus one submit-only run per clone.
     await waitFor(() => {
-      expect(generate).toHaveBeenCalledTimes(3);
+      expect(generate).toHaveBeenCalledTimes(1);
+      expect(submit).toHaveBeenCalledTimes(2);
     });
 
     await waitFor(() => {
@@ -570,6 +588,7 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
       kind: "image",
       url: "https://picsum.photos/seed/c1/768/768",
     });
+    vi.spyOn(realGeneration, "submitImageGeneration").mockReturnValue(new Promise(() => {}));
     const user = userEvent.setup();
     renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
@@ -603,6 +622,7 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
       kind: "image",
       url: "https://picsum.photos/seed/c1/768/768",
     });
+    vi.spyOn(realGeneration, "submitImageGeneration").mockReturnValue(new Promise(() => {}));
     const user = userEvent.setup();
 
     function TestCanvas() {
@@ -904,6 +924,7 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
       kind: "image",
       url: "https://picsum.photos/seed/c1/768/768",
     });
+    vi.spyOn(realGeneration, "submitImageGeneration").mockReturnValue(new Promise(() => {}));
     vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([flux]);
     const user = userEvent.setup();
     renderInCanvas([
@@ -1571,6 +1592,18 @@ describe("ImageGenerationNode real generation (issue #36)", () => {
       kind: "image",
       url: "https://fal.media/out.png",
     });
+    let submissions = 0;
+    const submit = vi
+      .spyOn(realGeneration, "submitImageGeneration")
+      .mockImplementation(async () => {
+        submissions += 1;
+        return {
+          requestId: `req-${submissions}`,
+          statusUrl: `https://queue.fal.run/x/status/${submissions}`,
+          responseUrl: `https://queue.fal.run/x/${submissions}`,
+        };
+      });
+    vi.spyOn(realGeneration, "resumeImageGeneration").mockReturnValue(new Promise(() => {}));
     const user = userEvent.setup();
     renderInCanvas([
       {
@@ -1588,53 +1621,21 @@ describe("ImageGenerationNode real generation (issue #36)", () => {
     await user.type(counter, "3");
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
-    // 3 variants total = 3 independent submissions (issue #47): the
-    // original's own run plus one per clone, each with the same prompt.
+    // 3 variants total = 3 independent submissions (issues #47/#48): the
+    // original's own full run plus one submit-only run per clone, each with
+    // the same prompt.
     await waitFor(() => {
-      expect(run).toHaveBeenCalledTimes(3);
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(submit).toHaveBeenCalledTimes(2);
     });
-    for (const nth of [1, 2, 3]) {
-      expect(run.mock.calls[nth - 1][0]).toEqual(
+    expect(run.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ endpointId: "fal-ai/flux/dev", prompt: "a cat" }),
+    );
+    for (const nth of [1, 2]) {
+      expect(submit.mock.calls[nth - 1][0]).toEqual(
         expect.objectContaining({ endpointId: "fal-ai/flux/dev", prompt: "a cat" }),
       );
     }
-  });
-
-  it("adds no History entry for a clone whose generation fails, while its siblings still get one", async () => {
-    // The original's run (the one with an options bag) and one clone
-    // succeed; the other clone fails and gets no History entry.
-    let cloneRuns = 0;
-    vi.spyOn(realGeneration, "runImageGeneration").mockImplementation(async (_input, options) => {
-      if (options) return { kind: "image", url: "https://fal.media/original.png" };
-      cloneRuns += 1;
-      if (cloneRuns === 1) return { kind: "image", url: "https://fal.media/c1.png" };
-      throw new Error("FAL error");
-    });
-    const user = userEvent.setup();
-    renderInCanvas([
-      {
-        id: "n1",
-        type: "imageGeneration",
-        position: { x: 0, y: 0 },
-        initialWidth: 400,
-        initialHeight: 500,
-        data: { prompt: "a cat", history: { entries: [], activeId: null }, model: testModel },
-      },
-    ]);
-
-    const counter = screen.getByRole("spinbutton", { name: /variant/i });
-    await user.clear(counter);
-    await user.type(counter, "3");
-    await user.click(screen.getByRole("button", { name: "Generate" }));
-
-    await waitFor(() => {
-      expect(document.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(3);
-    });
-    // The original and one clone got a real output; the failed clone's
-    // generation added no History entry, so it shows no output image at all.
-    await waitFor(() => {
-      expect(screen.getAllByRole("img", { name: "Generation output" })).toHaveLength(2);
-    });
   });
 });
 
@@ -1654,6 +1655,14 @@ describe("ImageGenerationNode: the original runs its own variant generation (iss
       kind: "image",
       url: "https://fal.media/out.png",
     });
+    // The clone's submission is submit-only (issue #48 / ADR-0011); its
+    // polling belongs to the clone and never settles here.
+    const submit = vi.spyOn(realGeneration, "submitImageGeneration").mockResolvedValue({
+      requestId: "req-clone",
+      statusUrl: "https://queue.fal.run/x/status",
+      responseUrl: "https://queue.fal.run/x",
+    });
+    vi.spyOn(realGeneration, "resumeImageGeneration").mockReturnValue(new Promise(() => {}));
     const user = userEvent.setup();
     renderNode({ prompt: "a cat", history: { entries: [], activeId: null }, model: testModel });
 
@@ -1663,19 +1672,30 @@ describe("ImageGenerationNode: the original runs its own variant generation (iss
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
     await waitFor(() => {
-      expect(run).toHaveBeenCalledTimes(2);
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(submit).toHaveBeenCalledTimes(1);
     });
   });
 
   it("appends the original's run to its existing History as the new Active Output, recording its own Actual Cost", async () => {
-    // The original's run goes through the normal single-Generate path (with
-    // an options bag carrying onPending); the clone's is fired bare by the
-    // submitter. Tell them apart by arity rather than call order.
-    vi.spyOn(realGeneration, "runImageGeneration").mockImplementation(async (_input, options) =>
-      options
-        ? { kind: "image", url: "https://fal.media/original.png", billableUnits: 2 }
-        : { kind: "image", url: "https://fal.media/clone.png", billableUnits: 1 },
-    );
+    // The original's run goes through the normal single-Generate path; the
+    // clone's run is submit-only from here (issue #48 / ADR-0011) and lands
+    // through the clone's own resume machinery.
+    vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/original.png",
+      billableUnits: 2,
+    });
+    vi.spyOn(realGeneration, "submitImageGeneration").mockResolvedValue({
+      requestId: "req-clone",
+      statusUrl: "https://queue.fal.run/x/status",
+      responseUrl: "https://queue.fal.run/x",
+    });
+    vi.spyOn(realGeneration, "resumeImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/clone.png",
+      billableUnits: 1,
+    });
     const user = userEvent.setup();
     let getNodeRef: ((id: string) => Node | undefined) | undefined;
 
@@ -1751,9 +1771,17 @@ describe("ImageGenerationNode: the original runs its own variant generation (iss
   });
 
   it("shows the original's failure as its own error state with no History entry, without blocking the clone's run", async () => {
-    vi.spyOn(realGeneration, "runImageGeneration").mockImplementation(async (_input, options) => {
-      if (options) throw new Error("FAL queue submit returned 422 for fal-ai/flux/dev");
-      return { kind: "image", url: "https://fal.media/clone.png" };
+    vi.spyOn(realGeneration, "runImageGeneration").mockRejectedValue(
+      new Error("FAL queue submit returned 422 for fal-ai/flux/dev"),
+    );
+    vi.spyOn(realGeneration, "submitImageGeneration").mockResolvedValue({
+      requestId: "req-clone",
+      statusUrl: "https://queue.fal.run/x/status",
+      responseUrl: "https://queue.fal.run/x",
+    });
+    vi.spyOn(realGeneration, "resumeImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/clone.png",
     });
     const user = userEvent.setup();
     renderNode({ prompt: "a cat", history: { entries: [], activeId: null }, model: testModel });
@@ -1790,6 +1818,7 @@ describe("ImageGenerationNode: the original runs its own variant generation (iss
         resolveGeneration = resolve;
       }),
     );
+    vi.spyOn(realGeneration, "submitImageGeneration").mockReturnValue(new Promise(() => {}));
     const user = userEvent.setup();
     renderNode({ prompt: "a cat", history: { entries: [], activeId: null }, model: testModel });
 
@@ -1816,6 +1845,7 @@ describe("ImageGenerationNode: the original runs its own variant generation (iss
       options?.onPending?.(pending);
       return { kind: "image", url: "https://fal.media/out.png" };
     });
+    vi.spyOn(realGeneration, "submitImageGeneration").mockReturnValue(new Promise(() => {}));
     const user = userEvent.setup();
     let getNodeRef: ((id: string) => Node | undefined) | undefined;
 
@@ -1862,6 +1892,346 @@ describe("ImageGenerationNode: the original runs its own variant generation (iss
       expect(data.history.entries).toHaveLength(1);
       expect(data.pendingGeneration).toBeNull();
     });
+  });
+});
+
+// Clones land on the canvas immediately and their runs are resumable
+// (CONTEXT.md's Variant / Clone, ADR-0011, issue #48): the submitter only
+// *submits* a clone's run — the clone is added to the canvas at trigger time
+// with its inherited incoming edges, its pending-generation record is written
+// into its node data as the submit is accepted, and the clone's own
+// resume-on-mount machinery (issue #38) polls the run to completion. The
+// submitter never polls a clone's run.
+describe("ImageGenerationNode: clones land immediately and their runs are resumable (issue #48)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("adds the clones and their inherited incoming edges to the canvas at trigger time, before any run finishes", async () => {
+    // Nothing ever settles: neither the original's run nor the clones'
+    // submissions resolve — the clones must be on the canvas regardless.
+    vi.spyOn(realGeneration, "runImageGeneration").mockReturnValue(new Promise(() => {}));
+    vi.spyOn(realGeneration, "submitImageGeneration").mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    renderInCanvas(
+      [
+        {
+          id: "ref1",
+          type: "staticTextReference",
+          position: { x: -300, y: 0 },
+          initialWidth: 200,
+          initialHeight: 100,
+          data: { text: "a red car" },
+        },
+        {
+          id: "gen1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "", history: { entries: [], activeId: null }, model: testModel },
+        },
+      ],
+      [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }],
+    );
+
+    const gen1Container = document.querySelector('[data-node-id="gen1"]') as HTMLElement;
+    const counter = within(gen1Container).getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "3");
+    await user.click(within(gen1Container).getByRole("button", { name: "Generate" }));
+
+    // Both clones are on the canvas although no run has finished, and each
+    // shows the Resolved Prompt from its inherited incoming text edge.
+    await waitFor(() => {
+      const nodeContainers = Array.from(
+        document.querySelectorAll<HTMLElement>(".react-flow__node[data-id]"),
+      );
+      const cloneContainers = nodeContainers.filter(
+        (el) => !["gen1", "ref1"].includes(el.dataset.id ?? ""),
+      );
+      expect(cloneContainers).toHaveLength(2);
+      for (const clone of cloneContainers) {
+        expect(within(clone).getByText("a red car")).toBeInTheDocument();
+      }
+    });
+  });
+
+  it("writes each clone's pending record into that clone's node data at submit acceptance, polls it only through the clone's own resume machinery, and shows the clone's generating state", async () => {
+    // The original's own run stays in flight forever; each clone submission
+    // is accepted with its own pending record; no clone run ever settles.
+    vi.spyOn(realGeneration, "runImageGeneration").mockReturnValue(new Promise(() => {}));
+    let submissions = 0;
+    vi.spyOn(realGeneration, "submitImageGeneration").mockImplementation(async () => {
+      submissions += 1;
+      return {
+        requestId: `req-clone-${submissions}`,
+        statusUrl: `https://queue.fal.run/x/status/${submissions}`,
+        responseUrl: `https://queue.fal.run/x/${submissions}`,
+      };
+    });
+    const resume = vi
+      .spyOn(realGeneration, "resumeImageGeneration")
+      .mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    let getNodesRef: (() => Node[]) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "a cat", history: { entries: [], activeId: null }, model: testModel },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNodes } = useReactFlow();
+      getNodesRef = getNodes as () => Node[];
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "3");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    // Each clone's node data carries its own pending record (so a reload
+    // resumes it), written as the submission was accepted.
+    await waitFor(() => {
+      const clones = (getNodesRef?.() ?? []).filter((node) => node.id !== "n1");
+      expect(clones).toHaveLength(2);
+      const pendingIds = clones.map(
+        (clone) => (clone.data as ImageGenerationNodeData).pendingGeneration?.requestId,
+      );
+      expect(pendingIds.sort()).toEqual(["req-clone-1", "req-clone-2"]);
+    });
+
+    // The submitter never polls a clone's run: the only full run is the
+    // original's own; the clones' runs are polled by their own resume
+    // machinery picking up the written record.
+    expect(realGeneration.runImageGeneration).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      const resumedIds = resume.mock.calls.map(([pending]) => pending.requestId);
+      expect(resumedIds.sort()).toEqual(["req-clone-1", "req-clone-2"]);
+    });
+
+    // Every variant shows its generating state while its run is in flight.
+    const nodeContainers = Array.from(
+      document.querySelectorAll<HTMLElement>(".react-flow__node[data-id]"),
+    );
+    expect(nodeContainers).toHaveLength(3);
+    for (const container of nodeContainers) {
+      expect(within(container).getAllByText(/generating/i).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("appends a finished clone run as exactly one History entry with the clone's own Actual Cost, clearing its pending record", async () => {
+    vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/original.png",
+      billableUnits: 2,
+    });
+    const clonePending = {
+      requestId: "req-clone",
+      statusUrl: "https://queue.fal.run/x/status",
+      responseUrl: "https://queue.fal.run/x",
+    };
+    vi.spyOn(realGeneration, "submitImageGeneration").mockResolvedValue(clonePending);
+    const resume = vi.spyOn(realGeneration, "resumeImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/clone.png",
+      billableUnits: 1,
+    });
+    const user = userEvent.setup();
+    let getNodesRef: (() => Node[]) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: {
+            prompt: "a cat",
+            history: { entries: [], activeId: null },
+            model: { ...testModel, pricing: { unitPrice: 0.1, unit: "images", currency: "USD" } },
+          },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNodes } = useReactFlow();
+      getNodesRef = getNodes as () => Node[];
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "2");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    // The clone's run settles into its single fresh output — its only
+    // History entry — recording the clone's own billed cost (1 × $0.10),
+    // and its pending record is cleared.
+    await waitFor(() => {
+      const clone = (getNodesRef?.() ?? []).find((node) => node.id !== "n1");
+      expect(clone).toBeDefined();
+      const cloneData = clone!.data as ImageGenerationNodeData;
+      expect(cloneData.history.entries).toHaveLength(1);
+      expect(cloneData.history.entries[0].output.url).toBe("https://fal.media/clone.png");
+      expect(cloneData.history.entries[0].actualCost).toBeCloseTo(0.1);
+      expect(cloneData.history.activeId).toBe(cloneData.history.entries[0].id);
+      expect(cloneData.pendingGeneration).toBeNull();
+    });
+
+    // …and the original's own run landed in its own History with its own
+    // cost (2 × $0.10) — never double-appended anywhere.
+    await waitFor(() => {
+      const original = (getNodesRef?.() ?? []).find((node) => node.id === "n1");
+      const originalData = original!.data as ImageGenerationNodeData;
+      expect(originalData.history.entries).toHaveLength(1);
+      expect(originalData.history.entries[0].output.url).toBe("https://fal.media/original.png");
+      expect(originalData.history.entries[0].actualCost).toBeCloseTo(0.2);
+    });
+    const clone = (getNodesRef?.() ?? []).find((node) => node.id !== "n1");
+    expect((clone!.data as ImageGenerationNodeData).history.entries).toHaveLength(1);
+    expect(resume).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces a clone's failed run as that clone's own error state with no History entry, without blocking its siblings", async () => {
+    vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/original.png",
+    });
+    let submissions = 0;
+    vi.spyOn(realGeneration, "submitImageGeneration").mockImplementation(async () => {
+      submissions += 1;
+      return {
+        requestId: `req-clone-${submissions}`,
+        statusUrl: `https://queue.fal.run/x/status/${submissions}`,
+        responseUrl: `https://queue.fal.run/x/${submissions}`,
+      };
+    });
+    vi.spyOn(realGeneration, "resumeImageGeneration").mockImplementation(async (pending) => {
+      if (pending.requestId === "req-clone-1") {
+        throw new Error("FAL queue status returned 422");
+      }
+      return { kind: "image", url: "https://fal.media/sibling.png" };
+    });
+    const user = userEvent.setup();
+    renderNode({ prompt: "a cat", history: { entries: [], activeId: null }, model: testModel });
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "3");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(3);
+    });
+
+    // The failed clone shows its own error state (an alert inside that
+    // clone, not the original) and no output…
+    const failedAlert = await screen.findByRole("alert");
+    expect(failedAlert).toHaveTextContent(/422/);
+    const failedClone = failedAlert.closest(".react-flow__node") as HTMLElement;
+    expect(within(failedClone).queryByRole("img", { name: "Generation output" })).not.toBeInTheDocument();
+
+    // …while its siblings — the original and the other clone — still land
+    // their own outputs.
+    await waitFor(() => {
+      const outputs = screen.getAllByRole("img", { name: "Generation output" });
+      expect(outputs.map((img) => img.getAttribute("src")).sort()).toEqual([
+        "https://fal.media/original.png",
+        "https://fal.media/sibling.png",
+      ]);
+    });
+  });
+
+  it("resumes every variant's run after a mid-run reload — original and clones alike", async () => {
+    // A reload mid-variant-run: both the original and the clone were
+    // persisted with their own pending records (written at submit time), so
+    // each node's mount resumes polling its own run.
+    const resume = vi
+      .spyOn(realGeneration, "resumeImageGeneration")
+      .mockReturnValue(new Promise(() => {}));
+    const originalPending = {
+      requestId: "req-original",
+      statusUrl: "https://queue.fal.run/o/status",
+      responseUrl: "https://queue.fal.run/o",
+    };
+    const clonePending = {
+      requestId: "req-clone",
+      statusUrl: "https://queue.fal.run/c/status",
+      responseUrl: "https://queue.fal.run/c",
+    };
+    renderInCanvas([
+      {
+        id: "original",
+        type: "imageGeneration",
+        position: { x: 0, y: 0 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: {
+          prompt: "a cat",
+          history: { entries: [], activeId: null },
+          model: testModel,
+          pendingGeneration: originalPending,
+        },
+      },
+      {
+        id: "clone",
+        type: "imageGeneration",
+        position: { x: 40, y: 420 },
+        initialWidth: 400,
+        initialHeight: 500,
+        data: {
+          prompt: "a cat",
+          history: { entries: [], activeId: null },
+          model: testModel,
+          pendingGeneration: clonePending,
+        },
+      },
+    ]);
+
+    await waitFor(() => {
+      const resumedIds = resume.mock.calls.map(([pending]) => pending.requestId);
+      expect(resumedIds.sort()).toEqual(["req-clone", "req-original"]);
+    });
+    for (const nodeId of ["original", "clone"]) {
+      const container = document.querySelector(`[data-node-id="${nodeId}"]`) as HTMLElement;
+      expect(within(container).getAllByText(/generating/i).length).toBeGreaterThan(0);
+    }
   });
 });
 

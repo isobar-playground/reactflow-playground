@@ -14,7 +14,7 @@ import {
 import { HandleBadge } from "@/components/nodes/handle-badge";
 import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
 import { useNodeActions } from "@/components/nodes/use-node-actions";
-import { runImageGeneration, resumeImageGeneration } from "@/lib/real-generation";
+import { runImageGeneration, resumeImageGeneration, submitImageGeneration } from "@/lib/real-generation";
 import type { PendingGeneration } from "@/lib/fal-generation";
 import {
   appendEntry,
@@ -291,9 +291,9 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
     }
   }
 
-  // Variant cloning (CONTEXT.md / ADR-0011, issues #12 and #47): the counter
-  // is the *total* number of variants and this node is one of them, so every
-  // variant runs its own generation — this node through the normal
+  // Variant cloning (CONTEXT.md / ADR-0011, issues #12, #47 and #48): the
+  // counter is the *total* number of variants and this node is one of them,
+  // so every variant runs its own generation — this node through the normal
   // single-Generate path above (History append, pendingGeneration
   // write-through, its own error state), plus (count - 1) sibling clones
   // added beside it. Each clone inherits only the original's incoming edges
@@ -301,20 +301,34 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   // single fresh output — never a copy of this node's History. The counter
   // resets to 1 at trigger time.
   //
+  // A variant run is owned by the variant node, not by this submitter
+  // (ADR-0011): the clones land on the canvas immediately — before any run
+  // finishes — and this handler only *submits* their runs
+  // (lib/real-generation.ts's submit-only submitImageGeneration), writing
+  // each clone's pending record into that clone's node data as its
+  // submission is accepted. The clone's own resume-on-mount machinery (the
+  // effect above, issue #38) picks the record up, polls the run to
+  // completion, and appends the single fresh output as the clone's only
+  // History entry — this submitter never polls a clone's run, so nothing
+  // here can double-append. A clone's failed run surfaces as that clone's
+  // own error state with no History entry, and no variant's failure blocks
+  // its siblings.
+  //
   // ADR-0002: getNode(id) already returns the live `data.prompt` — the
   // prompt field writes through on every keystroke — so no manual merge of
   // the local prompt into the cloned node's data is needed here.
-  // Each clone runs its own independent real FAL submission (CONTEXT.md /
-  // ADR-0009's Variant / Clone) — never a shared or copied result. A clone
-  // whose generation errors gets no History entry (CONTEXT.md), same as the
-  // original's own path, and no variant's failure blocks its siblings
-  // (ADR-0011).
   async function handleGenerateVariants(count: number) {
     if (!selectedModel) return;
     const node = getNode(id);
     if (!node) return;
     const { nodes: clones, edges: clonedEdges } = cloneVariants(node, getEdges(), count - 1);
     setVariantCountInput("1");
+
+    // Clones appear at trigger time, each starting with no run of its own
+    // yet — never with this node's pendingGeneration, which belongs to the
+    // original's run alone.
+    addNodes(clones.map((clone) => ({ ...clone, data: { ...clone.data, pendingGeneration: null } })));
+    addEdges(clonedEdges);
 
     // The original's run fires first, through the normal single-Generate
     // path — never awaited before the clones' submissions, so no variant's
@@ -325,40 +339,21 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
       selectedModel.hasNegativePrompt && data.negativePrompt ? data.negativePrompt : undefined;
     // Each clone inherits the original's incoming reference edges verbatim
     // (lib/variant-clone.ts), so its wired media inputs are the same
-    // `mediaConnections` this node itself just computed (issue #40).
-    const generated = await Promise.all(
-      clones.map(() =>
-        runImageGeneration({
+    // `mediaConnections` this node itself just computed (issue #40). A
+    // submission FAL rejects leaves that clone without a run — its siblings'
+    // submissions proceed regardless.
+    await Promise.all(
+      clones.map((clone) =>
+        submitImageGeneration({
           endpointId: selectedModel.endpointId,
           prompt: resolvedPromptText,
           negativePrompt,
           media: mediaConnections,
-        }).catch(() => null),
+        })
+          .then((pending) => updateNodeData(clone.id, { pendingGeneration: pending }))
+          .catch(() => null),
       ),
     );
-    const clonesWithOutput = clones.map((clone, index) => {
-      const result = generated[index];
-      if (!result) {
-        return { ...clone, data: { ...clone.data, history: clone.data.history } };
-      }
-      const { billableUnits, ...output } = result;
-      const actualCost = computeActualCost({ pricing: selectedModel.pricing, billableUnits });
-      return {
-        ...clone,
-        data: {
-          ...clone.data,
-          history: appendEntry(clone.data.history as NodeHistory, {
-            id: crypto.randomUUID(),
-            prompt,
-            output,
-            actualCost,
-          }),
-        },
-      };
-    });
-
-    addNodes(clonesWithOutput);
-    addEdges(clonedEdges);
     await ownRun;
   }
 

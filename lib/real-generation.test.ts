@@ -5,6 +5,7 @@ import {
   resumeImageGeneration,
   runVideoGeneration,
   resumeVideoGeneration,
+  submitImageGeneration,
 } from "./real-generation";
 import type { MediaHandleConnection } from "./generation-payload";
 import type { ResolvedHandle } from "./fal-schema";
@@ -155,6 +156,73 @@ describe("runImageGeneration", () => {
       { prompt: "a red car", image_url: "/uploads/cat.png" },
       [{ handleId: "image_url", url: "/uploads/cat.png" }],
     );
+  });
+});
+
+// submitImageGeneration (issue #48 / ADR-0011): the submit-only operation a
+// variant submitter uses for its clones — submits to the FAL queue and
+// resolves to the pending-generation record without ever polling. Polling
+// (and the History append it ends in) belongs to the clone node that owns
+// the run, via its resume-on-mount machinery.
+describe("submitImageGeneration", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const pending = {
+    requestId: "req-1",
+    statusUrl: "https://queue.fal.run/x/status",
+    responseUrl: "https://queue.fal.run/x",
+  };
+
+  it("submits the prompt (and negative_prompt when given) and resolves to the pending record without polling", async () => {
+    vi.spyOn(generationActions, "submitGenerationAction").mockResolvedValue(pending);
+    const poll = vi.spyOn(generationActions, "pollGenerationAction");
+
+    const result = await submitImageGeneration({
+      endpointId: "fal-ai/flux/schnell",
+      prompt: "a red car",
+      negativePrompt: "blurry",
+    });
+
+    expect(generationActions.submitGenerationAction).toHaveBeenCalledWith("fal-ai/flux/schnell", {
+      prompt: "a red car",
+      negative_prompt: "blurry",
+    });
+    expect(result).toEqual(pending);
+    expect(poll).not.toHaveBeenCalled();
+  });
+
+  it("folds connected media handles into the submitted body and forwards local asset refs, like a full run", async () => {
+    vi.spyOn(generationActions, "submitGenerationAction").mockResolvedValue(pending);
+    const poll = vi.spyOn(generationActions, "pollGenerationAction");
+
+    const imageUrlHandle: ResolvedHandle = {
+      handleId: "image_url",
+      label: "image_url",
+      dataType: "image",
+      many: false,
+    };
+    const media: MediaHandleConnection[] = [
+      {
+        handle: imageUrlHandle,
+        sources: [{ type: "staticMediaReference", data: { asset: { url: "/uploads/cat.png", type: "image" } } }],
+      },
+    ];
+
+    const result = await submitImageGeneration({
+      endpointId: "fal-ai/flux/schnell",
+      prompt: "a red car",
+      media,
+    });
+
+    expect(generationActions.submitGenerationAction).toHaveBeenCalledWith(
+      "fal-ai/flux/schnell",
+      { prompt: "a red car", image_url: "/uploads/cat.png" },
+      [{ handleId: "image_url", url: "/uploads/cat.png" }],
+    );
+    expect(result).toEqual(pending);
+    expect(poll).not.toHaveBeenCalled();
   });
 });
 

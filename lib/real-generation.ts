@@ -75,6 +75,20 @@ async function submit(input: RunGenerationInput): Promise<PendingGeneration> {
     : submitGenerationAction(input.endpointId, body);
 }
 
+// The submit-only operation (issue #48 / ADR-0011): submits to the FAL queue
+// exactly like a full run would — same payload building, same server action —
+// but resolves to the pending-generation record without ever polling. A
+// variant submitter uses this for its clones: it writes the record into the
+// clone's node data and hands the run to the clone's own resume-on-mount
+// machinery (issue #38), which polls it to completion. The submitter never
+// polls a clone's run — double-append is the failure mode ADR-0011's
+// ownership rule exists to prevent.
+export async function submitImageGeneration(
+  input: RunImageGenerationInput,
+): Promise<PendingGeneration> {
+  return submit(input);
+}
+
 // Actual Cost (CONTEXT.md / ADR-0009, issue #41): the resolved output plus
 // the FAL-reported billable-units count (lib/fal-generation.ts's
 // `x-fal-billable-units` header, forwarded verbatim through
