@@ -254,13 +254,52 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.pendingGeneration]);
 
-  // Variant cloning (CONTEXT.md / issue #12): when the counter is above one,
-  // Generate adds (count - 1) sibling clones beside this node instead of
-  // appending to its own History — the counter is the total number of
-  // variants, and this node is already one of them. Each clone inherits only
-  // the original's incoming edges (lib/variant-clone.ts), is laid out with an
-  // offset, and generates its own single fresh output — never a copy of this
-  // node's History. The counter resets to 1 afterward.
+  // The node's own generation — the normal single-Generate path (CONTEXT.md /
+  // ADR-0009): submit a real request to the selected Model's FAL queue
+  // endpoint, sending the Resolved Prompt as `prompt` and the negative-prompt
+  // config field when the Model supports it. The returned pending record is
+  // written through to data.pendingGeneration as soon as FAL accepts the
+  // submission (ADR-0009: enables resuming polling after a reload, wired
+  // separately in issue #38) and cleared once the run settles. On success, a
+  // new History entry becomes the Active Output (ADR-0002 / issue #16); on
+  // any FAL failure, an error message is shown instead and no History entry
+  // is added. Never throws — a failure settles into the node's own error
+  // state, so a variant batch awaiting this run isn't torn down by it
+  // (ADR-0011).
+  async function runOwnGeneration() {
+    if (!selectedModel) return;
+    setIsGenerating(true);
+    setGenerationError(null);
+    try {
+      const negativePrompt =
+        selectedModel.hasNegativePrompt && data.negativePrompt ? data.negativePrompt : undefined;
+      const result = await runImageGeneration(
+        { endpointId: selectedModel.endpointId, prompt: resolvedPromptText, negativePrompt, media: mediaConnections },
+        { onPending: (pending) => updateNodeData(id, { pendingGeneration: pending }) },
+      );
+      const { billableUnits, ...output } = result;
+      const actualCost = computeActualCost({ pricing: selectedModel.pricing, billableUnits });
+      updateNodeData(id, {
+        history: appendEntry(history, { id: crypto.randomUUID(), prompt, output, actualCost }),
+        pendingGeneration: null,
+      });
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : "Generation failed");
+      updateNodeData(id, { pendingGeneration: null });
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  // Variant cloning (CONTEXT.md / ADR-0011, issues #12 and #47): the counter
+  // is the *total* number of variants and this node is one of them, so every
+  // variant runs its own generation — this node through the normal
+  // single-Generate path above (History append, pendingGeneration
+  // write-through, its own error state), plus (count - 1) sibling clones
+  // added beside it. Each clone inherits only the original's incoming edges
+  // (lib/variant-clone.ts), is laid out with an offset, and generates its own
+  // single fresh output — never a copy of this node's History. The counter
+  // resets to 1 at trigger time.
   //
   // ADR-0002: getNode(id) already returns the live `data.prompt` — the
   // prompt field writes through on every keystroke — so no manual merge of
@@ -268,16 +307,19 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   // Each clone runs its own independent real FAL submission (CONTEXT.md /
   // ADR-0009's Variant / Clone) — never a shared or copied result. A clone
   // whose generation errors gets no History entry (CONTEXT.md), same as the
-  // single-generation path below, but doesn't block its siblings.
+  // original's own path, and no variant's failure blocks its siblings
+  // (ADR-0011).
   async function handleGenerateVariants(count: number) {
     if (!selectedModel) return;
-    setIsGenerating(true);
     const node = getNode(id);
-    if (!node) {
-      setIsGenerating(false);
-      return;
-    }
+    if (!node) return;
     const { nodes: clones, edges: clonedEdges } = cloneVariants(node, getEdges(), count - 1);
+    setVariantCountInput("1");
+
+    // The original's run fires first, through the normal single-Generate
+    // path — never awaited before the clones' submissions, so no variant's
+    // run blocks another's.
+    const ownRun = runOwnGeneration();
 
     const negativePrompt =
       selectedModel.hasNegativePrompt && data.negativePrompt ? data.negativePrompt : undefined;
@@ -317,46 +359,15 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
 
     addNodes(clonesWithOutput);
     addEdges(clonedEdges);
-    setVariantCountInput("1");
-    setIsGenerating(false);
+    await ownRun;
   }
 
-  // Every Generate/Regenerate submits a real request to the selected Model's
-  // FAL queue endpoint (CONTEXT.md / ADR-0009), sending the Resolved Prompt
-  // as `prompt` and the negative-prompt config field when the Model supports
-  // it. The returned pending record is written through to data.pending
-  // Generation as soon as FAL accepts the submission (ADR-0009: enables
-  // resuming polling after a reload, wired separately in issue #38) and
-  // cleared once the run settles. On success, a new History entry becomes
-  // the Active Output (ADR-0002 / issue #16); on any FAL failure, an error
-  // message is shown instead and no History entry is added.
   async function handleGenerate() {
     if (variantCount > 1) {
       await handleGenerateVariants(variantCount);
       return;
     }
-    if (!selectedModel) return;
-    setIsGenerating(true);
-    setGenerationError(null);
-    try {
-      const negativePrompt =
-        selectedModel.hasNegativePrompt && data.negativePrompt ? data.negativePrompt : undefined;
-      const result = await runImageGeneration(
-        { endpointId: selectedModel.endpointId, prompt: resolvedPromptText, negativePrompt, media: mediaConnections },
-        { onPending: (pending) => updateNodeData(id, { pendingGeneration: pending }) },
-      );
-      const { billableUnits, ...output } = result;
-      const actualCost = computeActualCost({ pricing: selectedModel.pricing, billableUnits });
-      updateNodeData(id, {
-        history: appendEntry(history, { id: crypto.randomUUID(), prompt, output, actualCost }),
-        pendingGeneration: null,
-      });
-    } catch (error) {
-      setGenerationError(error instanceof Error ? error.message : "Generation failed");
-      updateNodeData(id, { pendingGeneration: null });
-    } finally {
-      setIsGenerating(false);
-    }
+    await runOwnGeneration();
   }
 
   // Selecting a History thumbnail sets the Active Output and restores that

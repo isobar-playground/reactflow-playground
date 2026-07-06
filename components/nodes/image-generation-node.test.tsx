@@ -525,7 +525,8 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
     const generate = vi
       .spyOn(realGeneration, "runImageGeneration")
       .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c1/768/768" })
-      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c2/768/768" });
+      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c2/768/768" })
+      .mockResolvedValueOnce({ kind: "image", url: "https://picsum.photos/seed/c3/768/768" });
     const user = userEvent.setup();
     renderInCanvas([
       {
@@ -544,21 +545,23 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
     // A counter of 3 means 3 variants *total* — this node counts as one of
-    // them, so only 2 new siblings are cloned beside it.
+    // them (and runs its own generation, issue #47), so only 2 new siblings
+    // are cloned beside it, and 3 generations run in all.
     await waitFor(() => {
-      expect(generate).toHaveBeenCalledTimes(2);
+      expect(generate).toHaveBeenCalledTimes(3);
     });
 
     await waitFor(() => {
       expect(document.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(3);
     });
     await waitFor(() => {
-      expect(screen.getAllByRole("img", { name: "Generation output" })).toHaveLength(2);
+      expect(screen.getAllByRole("img", { name: "Generation output" })).toHaveLength(3);
     });
     const outputs = screen.getAllByRole("img", { name: "Generation output" });
     expect(outputs.map((img) => img.getAttribute("src")).sort()).toEqual([
       "https://picsum.photos/seed/c1/768/768",
       "https://picsum.photos/seed/c2/768/768",
+      "https://picsum.photos/seed/c3/768/768",
     ]);
   });
 
@@ -1563,11 +1566,11 @@ describe("ImageGenerationNode real generation (issue #36)", () => {
     expect(run).toHaveBeenCalledTimes(2);
   });
 
-  it("runs one independent real generation per clone when generating variants", async () => {
-    const run = vi
-      .spyOn(realGeneration, "runImageGeneration")
-      .mockResolvedValueOnce({ kind: "image", url: "https://fal.media/c1.png" })
-      .mockResolvedValueOnce({ kind: "image", url: "https://fal.media/c2.png" });
+  it("runs one independent real generation per variant, the original included, when generating variants", async () => {
+    const run = vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/out.png",
+    });
     const user = userEvent.setup();
     renderInCanvas([
       {
@@ -1585,23 +1588,28 @@ describe("ImageGenerationNode real generation (issue #36)", () => {
     await user.type(counter, "3");
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
+    // 3 variants total = 3 independent submissions (issue #47): the
+    // original's own run plus one per clone, each with the same prompt.
     await waitFor(() => {
-      expect(run).toHaveBeenCalledTimes(2);
+      expect(run).toHaveBeenCalledTimes(3);
     });
-    expect(run).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ endpointId: "fal-ai/flux/dev", prompt: "a cat" }),
-    );
-    expect(run).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ endpointId: "fal-ai/flux/dev", prompt: "a cat" }),
-    );
+    for (const nth of [1, 2, 3]) {
+      expect(run.mock.calls[nth - 1][0]).toEqual(
+        expect.objectContaining({ endpointId: "fal-ai/flux/dev", prompt: "a cat" }),
+      );
+    }
   });
 
-  it("adds no History entry for a clone whose generation fails, while its sibling still gets one", async () => {
-    vi.spyOn(realGeneration, "runImageGeneration")
-      .mockResolvedValueOnce({ kind: "image", url: "https://fal.media/c1.png" })
-      .mockRejectedValueOnce(new Error("FAL error"));
+  it("adds no History entry for a clone whose generation fails, while its siblings still get one", async () => {
+    // The original's run (the one with an options bag) and one clone
+    // succeed; the other clone fails and gets no History entry.
+    let cloneRuns = 0;
+    vi.spyOn(realGeneration, "runImageGeneration").mockImplementation(async (_input, options) => {
+      if (options) return { kind: "image", url: "https://fal.media/original.png" };
+      cloneRuns += 1;
+      if (cloneRuns === 1) return { kind: "image", url: "https://fal.media/c1.png" };
+      throw new Error("FAL error");
+    });
     const user = userEvent.setup();
     renderInCanvas([
       {
@@ -1622,10 +1630,237 @@ describe("ImageGenerationNode real generation (issue #36)", () => {
     await waitFor(() => {
       expect(document.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(3);
     });
-    // Only one clone got a real output; the other's failed generation added
-    // no History entry, so it shows no output image at all.
+    // The original and one clone got a real output; the failed clone's
+    // generation added no History entry, so it shows no output image at all.
     await waitFor(() => {
-      expect(screen.getAllByRole("img", { name: "Generation output" })).toHaveLength(1);
+      expect(screen.getAllByRole("img", { name: "Generation output" })).toHaveLength(2);
+    });
+  });
+});
+
+// The original runs its own variant generation (CONTEXT.md's Variant /
+// Clone, ADR-0011, issue #47): the variant count is the *total* number of
+// variants and the original is one of them, so a count of N fires N FAL
+// submissions — the original's through the normal single-Generate path
+// (History append, pendingGeneration write-through, own error state), plus
+// one per clone (fired by the submitter, kept as-is for now).
+describe("ImageGenerationNode: the original runs its own variant generation (issue #47)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("fires one FAL submission per variant, the original included (count 2 → 2 submissions)", async () => {
+    const run = vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/out.png",
+    });
+    const user = userEvent.setup();
+    renderNode({ prompt: "a cat", history: { entries: [], activeId: null }, model: testModel });
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "2");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("appends the original's run to its existing History as the new Active Output, recording its own Actual Cost", async () => {
+    // The original's run goes through the normal single-Generate path (with
+    // an options bag carrying onPending); the clone's is fired bare by the
+    // submitter. Tell them apart by arity rather than call order.
+    vi.spyOn(realGeneration, "runImageGeneration").mockImplementation(async (_input, options) =>
+      options
+        ? { kind: "image", url: "https://fal.media/original.png", billableUnits: 2 }
+        : { kind: "image", url: "https://fal.media/clone.png", billableUnits: 1 },
+    );
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: {
+            prompt: "a cat",
+            history: {
+              entries: [{ id: "old", prompt: "a cat", output: { kind: "image", url: "https://fal.media/old.png" } }],
+              activeId: "old",
+            },
+            model: { ...testModel, pricing: { unitPrice: 0.1, unit: "images", currency: "USD" } },
+          },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "2");
+    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+
+    // The original's prior entry is preserved, the new one is appended and
+    // becomes the Active Output, and it records the original's own billed
+    // cost (2 units × $0.10) — not the clone's.
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
+      expect(data.history.entries).toHaveLength(2);
+      expect(data.history.entries[0].output.url).toBe("https://fal.media/old.png");
+      expect(data.history.entries[1].output.url).toBe("https://fal.media/original.png");
+      expect(data.history.entries[1].actualCost).toBeCloseTo(0.2);
+      expect(data.history.activeId).toBe(data.history.entries[1].id);
+    });
+
+    // The clone's own single fresh output landed on the clone, not here.
+    await waitFor(() => {
+      const nodeContainers = Array.from(
+        document.querySelectorAll<HTMLElement>(".react-flow__node[data-id]"),
+      );
+      expect(nodeContainers).toHaveLength(2);
+      const clone = nodeContainers.find((el) => el.dataset.id !== "n1")!;
+      expect(within(clone).getByRole("img", { name: "Generation output" })).toHaveAttribute(
+        "src",
+        "https://fal.media/clone.png",
+      );
+      // …recording the clone's own Actual Cost (1 unit × $0.10), not the
+      // original's — each variant's History entry carries its own billed cost.
+      expect(within(clone).getByText("$0.10")).toBeInTheDocument();
+    });
+  });
+
+  it("shows the original's failure as its own error state with no History entry, without blocking the clone's run", async () => {
+    vi.spyOn(realGeneration, "runImageGeneration").mockImplementation(async (_input, options) => {
+      if (options) throw new Error("FAL queue submit returned 422 for fal-ai/flux/dev");
+      return { kind: "image", url: "https://fal.media/clone.png" };
+    });
+    const user = userEvent.setup();
+    renderNode({ prompt: "a cat", history: { entries: [], activeId: null }, model: testModel });
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "2");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    // The original shows its own error state and no output…
+    const original = document.querySelector('[data-node-id]') as HTMLElement;
+    expect(await within(original).findByRole("alert")).toHaveTextContent(/422/);
+    expect(within(original).queryByRole("img", { name: "Generation output" })).not.toBeInTheDocument();
+
+    // …while the clone still lands with its own fresh output.
+    await waitFor(() => {
+      const nodeContainers = Array.from(
+        document.querySelectorAll<HTMLElement>(".react-flow__node[data-id]"),
+      );
+      expect(nodeContainers).toHaveLength(2);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("img", { name: "Generation output" })).toHaveAttribute(
+        "src",
+        "https://fal.media/clone.png",
+      );
+    });
+  });
+
+  it("resets the variant counter to 1 at trigger time, before the runs settle", async () => {
+    let resolveGeneration!: (result: { kind: "image"; url: string }) => void;
+    vi.spyOn(realGeneration, "runImageGeneration").mockReturnValue(
+      new Promise((resolve) => {
+        resolveGeneration = resolve;
+      }),
+    );
+    const user = userEvent.setup();
+    renderNode({ prompt: "a cat", history: { entries: [], activeId: null }, model: testModel });
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "2");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    // Still generating (nothing resolved yet), but the counter is already 1.
+    await waitFor(() => {
+      expect(counter).toHaveValue(1);
+    });
+
+    resolveGeneration({ kind: "image", url: "https://fal.media/out.png" });
+  });
+
+  it("writes the original's pending record through to data at submit time in a variant run (reload resume, ADR-0009)", async () => {
+    const pending = {
+      requestId: "req-original",
+      statusUrl: "https://queue.fal.run/x/status",
+      responseUrl: "https://queue.fal.run/x",
+    };
+    vi.spyOn(realGeneration, "runImageGeneration").mockImplementation(async (_input, options) => {
+      options?.onPending?.(pending);
+      return { kind: "image", url: "https://fal.media/out.png" };
+    });
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: { prompt: "a cat", history: { entries: [], activeId: null }, model: testModel },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    const counter = screen.getByRole("spinbutton", { name: /variant/i });
+    await user.clear(counter);
+    await user.type(counter, "2");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    // The original's submission carried the onPending write-through (the
+    // record lands in data and is cleared once the run settles), so a
+    // mid-run reload can resume the original's run.
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
+      expect(data.history.entries).toHaveLength(1);
+      expect(data.pendingGeneration).toBeNull();
     });
   });
 });
