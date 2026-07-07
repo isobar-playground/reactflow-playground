@@ -137,7 +137,7 @@ describe("ImageGenerationNode layout", () => {
     expect(prompt).toHaveValue("a cat");
   });
 
-  it("uses a media-first card with stable preview space and compact generation metadata", () => {
+  it("uses a media-first card with working controls and output-attached cost chips", () => {
     renderNode({
       prompt: "a cat",
       history: {
@@ -164,10 +164,18 @@ describe("ImageGenerationNode layout", () => {
       "src",
       "https://fal.media/a.png",
     );
+    expect(within(preview).getByText("$0.16")).toBeInTheDocument();
     expect(within(node).getAllByText("FLUX.1 [dev]").length).toBeGreaterThan(0);
-    expect(within(node).getByText("Ready")).toBeInTheDocument();
-    expect(within(node).getByText("Est. ~$0.08")).toBeInTheDocument();
-    expect(within(node).getByText("$0.16")).toBeInTheDocument();
+    expect(within(node).getByRole("spinbutton", { name: /variant/i })).toBeInTheDocument();
+    expect(within(node).getByPlaceholderText(/prompt/i)).toBeInTheDocument();
+
+    const actionRow = within(node).getByRole("button", { name: "Regenerate" }).parentElement as HTMLElement;
+    expect(within(actionRow).getByText("Est. ~$0.08")).toBeInTheDocument();
+    expect(within(node).queryByText("Model")).not.toBeInTheDocument();
+    expect(within(node).queryByText("Status")).not.toBeInTheDocument();
+    expect(within(node).queryByText("Estimated Price")).not.toBeInTheDocument();
+    expect(within(node).queryByText("Actual Cost")).not.toBeInTheDocument();
+    expect(within(node).queryByText("Unavailable")).not.toBeInTheDocument();
   });
 
 });
@@ -357,6 +365,37 @@ describe("ImageGenerationNode history carousel", () => {
 
     const thumbnails = screen.getAllByRole("img", { name: /history entry/i });
     expect(thumbnails).toHaveLength(5);
+  });
+
+  it("shows known Actual Cost chips on completed History entries and no missing-cost chip", () => {
+    renderNode({
+      prompt: "current prompt",
+      history: {
+        entries: [
+          {
+            id: "costed",
+            prompt: "costed prompt",
+            output: { kind: "image", url: "https://fal.media/costed.png" },
+            actualCost: 0.24,
+          },
+          {
+            id: "uncosted",
+            prompt: "uncosted prompt",
+            output: { kind: "image", url: "https://fal.media/uncosted.png" },
+          },
+        ],
+        activeId: "costed",
+      },
+      model: testModel,
+    });
+
+    const historyImages = screen.getAllByRole("img", { name: "History entry" });
+    const costedEntry = historyImages[0].closest("div") as HTMLElement;
+    const uncostedEntry = historyImages[1].closest("div") as HTMLElement;
+
+    expect(within(costedEntry).getByLabelText("History entry actual cost")).toHaveTextContent("$0.24");
+    expect(within(uncostedEntry).queryByLabelText("History entry actual cost")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
   });
 });
 

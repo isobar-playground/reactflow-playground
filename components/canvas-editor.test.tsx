@@ -678,7 +678,7 @@ describe("CanvasEditor Node Details Drawer", () => {
       expect(screen.queryByRole("region", { name: "Node details drawer" })).not.toBeInTheDocument();
     });
     expect(screen.getByDisplayValue("local prompt")).toBeInTheDocument();
-    expect(screen.getAllByText("FLUX.1 Dev")).toHaveLength(2);
+    expect(screen.getByText("FLUX.1 Dev")).toBeInTheDocument();
     expect(screen.getByAltText("Generation output")).toHaveAttribute(
       "src",
       "https://fal.media/second.png",

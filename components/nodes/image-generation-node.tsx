@@ -468,7 +468,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
 
       <div
         aria-label="Image generation preview"
-        className="mb-3 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg border border-[var(--studio-border)] bg-muted"
+        className="relative mb-3 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg border border-[var(--studio-border)] bg-muted"
       >
         {hasPendingOutput ? (
           <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
@@ -476,40 +476,25 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
             <span>Pending output</span>
           </div>
         ) : activeEntry ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={activeEntry.output.url}
-            alt="Generation output"
-            className="h-full w-full object-cover"
-          />
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={activeEntry.output.url}
+              alt="Generation output"
+              className="h-full w-full object-cover"
+            />
+            {activeCostLabel && (
+              <span
+                aria-label="Active output actual cost"
+                className="absolute right-2 top-2 rounded-full border border-white/50 bg-black/70 px-2 py-0.5 text-[11px] font-medium text-white shadow-sm"
+              >
+                {activeCostLabel}
+              </span>
+            )}
+          </>
         ) : (
           <span className="text-sm text-muted-foreground">No output yet</span>
         )}
-      </div>
-
-      <div className="mb-3 grid grid-cols-2 gap-1.5 text-[11px] text-muted-foreground">
-        <div className="min-w-0 rounded-md border border-[var(--studio-border)] bg-muted px-2 py-1">
-          <div className="text-[10px] uppercase tracking-normal">Model</div>
-          <div className="truncate font-medium text-[var(--studio-ink)]">
-            {selectedModel?.name ?? "Select a model"}
-          </div>
-        </div>
-        <div className="min-w-0 rounded-md border border-[var(--studio-border)] bg-muted px-2 py-1">
-          <div className="text-[10px] uppercase tracking-normal">Status</div>
-          <div className="truncate font-medium text-[var(--studio-ink)]">{statusLabel}</div>
-        </div>
-        <div className="min-w-0 rounded-md border border-[var(--studio-border)] bg-muted px-2 py-1">
-          <div className="text-[10px] uppercase tracking-normal">Estimated Price</div>
-          <div className="truncate font-medium text-[var(--studio-ink)]">
-            {estimatedPriceLabel ?? "Unavailable"}
-          </div>
-        </div>
-        <div className="min-w-0 rounded-md border border-[var(--studio-border)] bg-muted px-2 py-1">
-          <div className="text-[10px] uppercase tracking-normal">Actual Cost</div>
-          <div className="truncate font-medium text-[var(--studio-ink)]">
-            {activeCostLabel ?? "Unavailable"}
-          </div>
-        </div>
       </div>
 
       {/* History carousel (CONTEXT.md): appears once there are multiple
@@ -519,29 +504,36 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
           own Actual Cost underneath (issue #41). */}
       {(history.entries.length >= 2 || (history.entries.length > 0 && hasPendingOutput)) && (
         <div className="nodrag mb-3 flex gap-1.5 overflow-x-auto">
-          {history.entries.map((entry) => (
-            <div key={entry.id} className="flex shrink-0 flex-col items-center gap-0.5">
-              <button
-                type="button"
-                onClick={() => handleSelectHistoryEntry(entry.id)}
-                className={`h-12 w-12 shrink-0 overflow-hidden rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)] ${
-                  entry.id === history.activeId ? "border-primary ring-2 ring-[var(--studio-focus-ring)]" : "border-border"
-                }`}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={entry.output.url}
-                  alt="History entry"
-                  className="h-full w-full object-cover"
-                />
-              </button>
-              {formatActualCost(entry.actualCost) && (
-                <span className="text-[10px] text-muted-foreground">
-                  {formatActualCost(entry.actualCost)}
-                </span>
-              )}
-            </div>
-          ))}
+          {history.entries.map((entry) => {
+            const entryCostLabel = formatActualCost(entry.actualCost);
+
+            return (
+              <div key={entry.id} className="flex shrink-0 flex-col items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => handleSelectHistoryEntry(entry.id)}
+                  className={`h-12 w-12 shrink-0 overflow-hidden rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)] ${
+                    entry.id === history.activeId ? "border-primary ring-2 ring-[var(--studio-focus-ring)]" : "border-border"
+                  }`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={entry.output.url}
+                    alt="History entry"
+                    className="h-full w-full object-cover"
+                  />
+                </button>
+                {entryCostLabel && (
+                  <span
+                    aria-label="History entry actual cost"
+                    className="rounded-full border border-[var(--studio-border)] bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                  >
+                    {entryCostLabel}
+                  </span>
+                )}
+              </div>
+            );
+          })}
           {hasPendingOutput && (
             <div
               aria-label="Pending history entry"
@@ -691,6 +683,11 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         >
           {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
         </button>
+        {estimatedPriceLabel && (
+          <span className="shrink-0 rounded-full border border-[var(--studio-border)] bg-muted px-2 py-1 text-[11px] font-medium text-[var(--studio-ink)]">
+            {estimatedPriceLabel}
+          </span>
+        )}
       </div>
 
       {/* Input Handles (ADR-0007 / ADR-0008 / issue #30): none until a Model

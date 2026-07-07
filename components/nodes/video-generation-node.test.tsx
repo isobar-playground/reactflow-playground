@@ -136,7 +136,7 @@ describe("VideoGenerationNode layout", () => {
     expect(prompt).toHaveValue("a flying camera");
   });
 
-  it("uses a media-first card with stable video preview space and compact generation metadata", () => {
+  it("uses a media-first card with working controls and output-attached cost chips", () => {
     renderNode({
       prompt: "a flying camera",
       history: {
@@ -163,10 +163,18 @@ describe("VideoGenerationNode layout", () => {
     const video = within(preview).getByLabelText("Generation video output");
     expect(video).toHaveAttribute("src", "https://fal.media/a.mp4");
     expect(video).toHaveAttribute("playsinline");
+    expect(within(preview).getByText("$0.42")).toBeInTheDocument();
     expect(within(node).getAllByText("Kling Video v3 Pro").length).toBeGreaterThan(0);
-    expect(within(node).getByText("Ready")).toBeInTheDocument();
-    expect(within(node).getByText("Est. ~$0.42")).toBeInTheDocument();
-    expect(within(node).getByText("$0.42")).toBeInTheDocument();
+    expect(within(node).getByRole("spinbutton", { name: /variant/i })).toBeInTheDocument();
+    expect(within(node).getByPlaceholderText(/prompt/i)).toBeInTheDocument();
+
+    const actionRow = within(node).getByRole("button", { name: "Regenerate" }).parentElement as HTMLElement;
+    expect(within(actionRow).getByText("Est. ~$0.42")).toBeInTheDocument();
+    expect(within(node).queryByText("Model")).not.toBeInTheDocument();
+    expect(within(node).queryByText("Status")).not.toBeInTheDocument();
+    expect(within(node).queryByText("Estimated Price")).not.toBeInTheDocument();
+    expect(within(node).queryByText("Actual Cost")).not.toBeInTheDocument();
+    expect(within(node).queryByText("Unavailable")).not.toBeInTheDocument();
   });
 
   it("renders a source output handle and no target handles before a Model is selected", () => {
@@ -663,6 +671,39 @@ describe("VideoGenerationNode persistence", () => {
       expect(data.history.activeId).toBe(data.history.entries[0].id);
       expect(data.history.entries).toHaveLength(2);
     });
+  });
+
+  it("shows known Actual Cost chips on completed History entries and no missing-cost chip", () => {
+    renderNode({
+      prompt: "current prompt",
+      history: {
+        entries: [
+          {
+            id: "costed",
+            prompt: "costed prompt",
+            output: { kind: "video", url: "https://fal.media/costed.mp4" },
+            actualCost: 0.32,
+          },
+          {
+            id: "uncosted",
+            prompt: "uncosted prompt",
+            output: { kind: "video", url: "https://fal.media/uncosted.mp4" },
+          },
+        ],
+        activeId: "costed",
+      },
+      model: testModel,
+    });
+
+    const historyButtons = screen.getAllByRole("button").filter((button) =>
+      button.querySelector("video"),
+    );
+    const costedEntry = historyButtons[0].closest("div") as HTMLElement;
+    const uncostedEntry = historyButtons[1].closest("div") as HTMLElement;
+
+    expect(within(costedEntry).getByLabelText("History entry actual cost")).toHaveTextContent("$0.32");
+    expect(within(uncostedEntry).queryByLabelText("History entry actual cost")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
   });
 });
 
