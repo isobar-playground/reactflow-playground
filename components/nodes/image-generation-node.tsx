@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Settings2 } from "lucide-react";
 import {
   Position,
   useNodeConnections,
@@ -12,7 +11,6 @@ import {
   type Node,
 } from "@xyflow/react";
 import { HandleBadge } from "@/components/nodes/handle-badge";
-import { focusFirstDescendant, trapFocusWithin } from "@/components/nodes/focus-management";
 import { useGenerationNodeRuntime } from "@/components/nodes/generation-node-runtime";
 import { ModelPicker, type ApprovedPickerModel } from "@/components/nodes/model-picker";
 import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
@@ -103,21 +101,11 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   // clamped to >= 1 when Generate reads it.
   const [variantCountInput, setVariantCountInput] = useState("1");
   const variantCount = Math.max(1, parseInt(variantCountInput, 10) || 1);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const advancedTriggerRef = useRef<HTMLButtonElement>(null);
-  const advancedPanelRef = useRef<HTMLElement>(null);
 
   const activeEntry = getActiveEntry(history);
   const selectedModel = data.model;
   const hasPendingOutput = Boolean(data.pendingGeneration);
   const activeCostLabel = activeEntry ? formatActualCost(activeEntry.actualCost) : null;
-  const statusLabel = isGenerating
-    ? "Generating"
-    : generationError
-      ? "Error"
-      : data.pendingGeneration
-        ? "Pending"
-        : "Ready";
 
   // Estimated Price (CONTEXT.md / ADR-0009, issue #37): unit price × naively
   // estimated units × variant count, recomputed live as the variant counter
@@ -220,18 +208,6 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
       setGenerationNodeRuntime(id, { isGenerating: false, error: null });
     };
   }, [id, isGenerating, generationError, setGenerationNodeRuntime]);
-
-  useEffect(() => {
-    if (!advancedOpen || !advancedPanelRef.current) return;
-    requestAnimationFrame(() => {
-      if (advancedPanelRef.current) focusFirstDescendant(advancedPanelRef.current);
-    });
-  }, [advancedOpen]);
-
-  function closeAdvancedSettings() {
-    setAdvancedOpen(false);
-    requestAnimationFrame(() => advancedTriggerRef.current?.focus());
-  }
 
   // React Flow only re-measures a node's Handle positions on resize/mount
   // (useUpdateNodeInternals' own documented caveat — see
@@ -451,17 +427,6 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
           <span className={`${BADGE_CLASSES} border-[var(--data-image-border)] bg-[var(--data-image-bg)] text-[var(--data-image-fg)]`}>
             {modeLabel}
           </span>
-          <button
-            ref={advancedTriggerRef}
-            type="button"
-            aria-label={advancedOpen ? "Close advanced settings" : "Open advanced settings"}
-            aria-expanded={advancedOpen}
-            onClick={() => setAdvancedOpen((open) => !open)}
-            className="nodrag flex size-7 shrink-0 items-center justify-center rounded-md border border-[var(--studio-border)] bg-[var(--studio-input)] text-muted-foreground shadow-sm transition-colors hover:border-[var(--studio-border-strong)] hover:bg-[var(--studio-control-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)]"
-            title={advancedOpen ? "Close advanced settings" : "Open advanced settings"}
-          >
-            <Settings2 className="size-3.5" />
-          </button>
           <NodeActionsMenu onDuplicate={duplicate} onDelete={remove} />
         </div>
       </div>
@@ -601,77 +566,6 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         <p role="alert" className="mb-3 text-xs text-destructive">
           {generationError}
         </p>
-      )}
-
-      {advancedOpen && (
-        <section
-          ref={advancedPanelRef}
-          role="region"
-          aria-label="Advanced image generation settings"
-          tabIndex={-1}
-          onKeyDown={(event) => {
-            if (advancedPanelRef.current) {
-              trapFocusWithin(event, advancedPanelRef.current, closeAdvancedSettings);
-            }
-          }}
-          className="nodrag mb-3 space-y-3 rounded-lg border border-[var(--studio-border)] bg-[var(--studio-panel)] p-3 text-xs"
-        >
-          <div className="rounded-md border border-[var(--studio-border)] bg-muted p-2">
-            <div className="mb-1 font-medium text-[var(--studio-ink)]">Resolved Prompt</div>
-            <div className="break-words text-muted-foreground">
-              {resolvedPromptText || "No prompt text"}
-            </div>
-          </div>
-
-          <div className="rounded-md border border-[var(--studio-border)] bg-muted p-2">
-            <div className="mb-1 font-medium text-[var(--studio-ink)]">Model Details</div>
-            <dl className="space-y-1 text-muted-foreground">
-              <div className="flex justify-between gap-2">
-                <dt>Name</dt>
-                <dd className="min-w-0 truncate text-right text-[var(--studio-ink)]">
-                  {selectedModel?.name ?? "None"}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt>Endpoint</dt>
-                <dd className="min-w-0 truncate text-right text-[var(--studio-ink)]">
-                  {selectedModel?.endpointId ?? "None"}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt>Status</dt>
-                <dd className="text-[var(--studio-ink)]">{statusLabel}</dd>
-              </div>
-              {generationError && (
-                <div className="flex justify-between gap-2">
-                  <dt>Error</dt>
-                  <dd className="min-w-0 truncate text-right text-destructive">{generationError}</dd>
-                </div>
-              )}
-            </dl>
-          </div>
-
-          <div className="rounded-md border border-[var(--studio-border)] bg-muted p-2">
-            <div className="mb-2 font-medium text-[var(--studio-ink)]">Full History</div>
-            {history.entries.length > 0 ? (
-              <ol className="space-y-2">
-                {history.entries.map((entry, index) => (
-                  <li key={entry.id} className="rounded-md bg-[var(--studio-card)] p-2">
-                    <div className="mb-1 flex items-center justify-between gap-2 text-muted-foreground">
-                      <span>Entry {index + 1}</span>
-                      {formatActualCost(entry.actualCost) && (
-                        <span>{formatActualCost(entry.actualCost)}</span>
-                      )}
-                    </div>
-                    <div className="break-words text-[var(--studio-ink)]">{entry.prompt}</div>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <div className="text-muted-foreground">No History yet</div>
-            )}
-          </div>
-        </section>
       )}
 
       <div className="flex items-center gap-2">

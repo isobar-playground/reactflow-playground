@@ -231,12 +231,12 @@ describe("VideoGenerationNode generation", () => {
   });
 });
 
-describe("VideoGenerationNode advanced drawer", () => {
+describe("VideoGenerationNode inline details", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("opens and closes a node-level drawer with resolved prompt, model details, status, errors, and full History", async () => {
+  it("does not render inline advanced settings controls or panel", async () => {
     vi.spyOn(realGeneration, "runVideoGeneration").mockRejectedValue(new Error("FAL queue rejected"));
     const user = userEvent.setup();
     renderNode({
@@ -270,22 +270,18 @@ describe("VideoGenerationNode advanced drawer", () => {
 
     await user.click(screen.getByRole("button", { name: "Regenerate" }));
     await screen.findByRole("alert");
-    expect(screen.queryByLabelText("Negative prompt")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
-    const drawer = screen.getByRole("region", { name: "Advanced video generation settings" });
-    expect(within(drawer).queryByLabelText("Negative prompt")).not.toBeInTheDocument();
-    expect(within(drawer).getByText("local prompt")).toBeInTheDocument();
-    expect(within(drawer).getByText("fal-ai/has-negative-prompt-video")).toBeInTheDocument();
-    expect(within(drawer).getAllByText("Error").length).toBeGreaterThan(0);
-    expect(within(drawer).getByText("FAL queue rejected")).toBeInTheDocument();
-    expect(within(drawer).getByText("first prompt")).toBeInTheDocument();
-    expect(within(drawer).getByText("second prompt")).toBeInTheDocument();
-    expect(within(drawer).getByText("$0.20")).toBeInTheDocument();
-    expect(within(drawer).getByText("$0.40")).toBeInTheDocument();
+    const node = document.querySelector('[data-node-id="n1"]') as HTMLElement;
 
-    await user.click(screen.getByRole("button", { name: "Close advanced settings" }));
-    expect(screen.queryByRole("region", { name: "Advanced video generation settings" })).not.toBeInTheDocument();
+    expect(within(node).queryByRole("button", { name: "Open advanced settings" })).not.toBeInTheDocument();
+    expect(within(node).queryByRole("button", { name: "Close advanced settings" })).not.toBeInTheDocument();
+    expect(within(node).queryByRole("region", { name: "Advanced video generation settings" })).not.toBeInTheDocument();
+    expect(within(node).queryByLabelText("Negative prompt")).not.toBeInTheDocument();
+    expect(within(node).getByPlaceholderText(/prompt/i)).toHaveValue("local prompt");
+    expect(within(node).getByRole("spinbutton", { name: /variant/i })).toBeInTheDocument();
+    expect(within(node).getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
+    expect(within(node).getByLabelText("Video generation preview")).toBeInTheDocument();
+    expect(within(node).getByRole("alert")).toHaveTextContent("FAL queue rejected");
   });
 });
 
@@ -856,28 +852,15 @@ describe("VideoGenerationNode Model picker (issue #31)", () => {
     });
   });
 
-  it("traps focus inside the advanced drawer and returns it to the trigger on Escape", async () => {
-    const user = userEvent.setup();
+  it("does not render an inline advanced settings trigger after a Model is selected", () => {
     renderNode({
       prompt: "local prompt",
       history: { entries: [], activeId: null },
       model: { ...testModel, hasNegativePrompt: true },
     });
 
-    const trigger = screen.getByRole("button", { name: /open advanced settings/i });
-    await user.click(trigger);
-
-    const drawer = screen.getByRole("region", { name: "Advanced video generation settings" });
-    await waitFor(() => expect(drawer).toHaveFocus());
-
-    await user.tab();
-    expect(drawer).toHaveFocus();
-
-    await user.keyboard("[Escape]");
-    await waitFor(() => {
-      expect(screen.queryByRole("region", { name: "Advanced video generation settings" })).not.toBeInTheDocument();
-      expect(trigger).toHaveFocus();
-    });
+    expect(screen.queryByRole("button", { name: /advanced settings/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Advanced video generation settings" })).not.toBeInTheDocument();
   });
 
   it("restores a saved Model selection on reload without refetching the picker's answer", () => {
@@ -1261,16 +1244,13 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows no negative-prompt field before a Model is selected", async () => {
-    const user = userEvent.setup();
+  it("shows no negative-prompt field before a Model is selected", () => {
     renderNode();
 
-    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
-  it("keeps the negative-prompt field off the node surface when a selected Model supports it", async () => {
-    const user = userEvent.setup();
+  it("keeps the negative-prompt field off the node surface when a selected Model supports it", () => {
     renderNode({
       prompt: "",
       history: { entries: [], activeId: null },
@@ -1283,12 +1263,10 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
-  it("hides the negative-prompt field for a selected Model whose schema has no negative_prompt", async () => {
-    const user = userEvent.setup();
+  it("hides the negative-prompt field for a selected Model whose schema has no negative_prompt", () => {
     renderNode({
       prompt: "",
       history: { entries: [], activeId: null },
@@ -1301,7 +1279,6 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
@@ -1334,7 +1311,6 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
     renderNode();
 
     await chooseModel(user, "Kling Video v3 Pro");
-    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
 
     await waitFor(() => {
       expect(screen.queryByText(/select a model to configure/i)).not.toBeInTheDocument();
@@ -1354,12 +1330,10 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
     await waitFor(() => {
       expect(screen.queryByText(/select a model to configure/i)).not.toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
-  it("does not show a saved negative-prompt value on the node surface", async () => {
-    const user = userEvent.setup();
+  it("does not show a saved negative-prompt value on the node surface", () => {
     renderNode({
       prompt: "",
       history: { entries: [], activeId: null },
@@ -1373,7 +1347,6 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
       negativePrompt: "blurry, low quality",
     });
 
-    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 

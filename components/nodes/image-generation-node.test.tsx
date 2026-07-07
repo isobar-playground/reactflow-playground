@@ -180,13 +180,12 @@ describe("ImageGenerationNode layout", () => {
 
 });
 
-describe("ImageGenerationNode advanced drawer", () => {
+describe("ImageGenerationNode inline details", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("opens and closes a node-level drawer with resolved prompt, model details, and full History", async () => {
-    const user = userEvent.setup();
+  it("does not render inline advanced settings controls or panel", () => {
     renderNode({
       prompt: "local prompt",
       history: {
@@ -216,20 +215,16 @@ describe("ImageGenerationNode advanced drawer", () => {
       negativePrompt: "blurry",
     });
 
-    expect(screen.queryByLabelText("Negative prompt")).not.toBeInTheDocument();
+    const node = document.querySelector('[data-node-id="n1"]') as HTMLElement;
 
-    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
-    const drawer = screen.getByRole("region", { name: "Advanced image generation settings" });
-    expect(within(drawer).queryByLabelText("Negative prompt")).not.toBeInTheDocument();
-    expect(within(drawer).getByText("local prompt")).toBeInTheDocument();
-    expect(within(drawer).getByText("fal-ai/has-negative-prompt")).toBeInTheDocument();
-    expect(within(drawer).getByText("first prompt")).toBeInTheDocument();
-    expect(within(drawer).getByText("second prompt")).toBeInTheDocument();
-    expect(within(drawer).getByText("$0.10")).toBeInTheDocument();
-    expect(within(drawer).getByText("$0.30")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Close advanced settings" }));
-    expect(screen.queryByRole("region", { name: "Advanced image generation settings" })).not.toBeInTheDocument();
+    expect(within(node).queryByRole("button", { name: "Open advanced settings" })).not.toBeInTheDocument();
+    expect(within(node).queryByRole("button", { name: "Close advanced settings" })).not.toBeInTheDocument();
+    expect(within(node).queryByRole("region", { name: "Advanced image generation settings" })).not.toBeInTheDocument();
+    expect(within(node).queryByLabelText("Negative prompt")).not.toBeInTheDocument();
+    expect(within(node).getByPlaceholderText(/prompt/i)).toHaveValue("local prompt");
+    expect(within(node).getByRole("spinbutton", { name: /variant/i })).toBeInTheDocument();
+    expect(within(node).getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
+    expect(within(node).getByLabelText("Image generation preview")).toBeInTheDocument();
   });
 });
 
@@ -1070,28 +1065,15 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
     });
   });
 
-  it("traps focus inside the advanced drawer and returns it to the trigger on Escape", async () => {
-    const user = userEvent.setup();
+  it("does not render an inline advanced settings trigger after a Model is selected", () => {
     renderNode({
       prompt: "local prompt",
       history: { entries: [], activeId: null },
       model: { ...testModel, hasNegativePrompt: true },
     });
 
-    const trigger = screen.getByRole("button", { name: /open advanced settings/i });
-    await user.click(trigger);
-
-    const drawer = screen.getByRole("region", { name: "Advanced image generation settings" });
-    await waitFor(() => expect(drawer).toHaveFocus());
-
-    await user.tab();
-    expect(drawer).toHaveFocus();
-
-    await user.keyboard("[Escape]");
-    await waitFor(() => {
-      expect(screen.queryByRole("region", { name: "Advanced image generation settings" })).not.toBeInTheDocument();
-      expect(trigger).toHaveFocus();
-    });
+    expect(screen.queryByRole("button", { name: /advanced settings/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Advanced image generation settings" })).not.toBeInTheDocument();
   });
 
   it("restores a saved Model selection on reload without refetching the picker's answer", () => {
@@ -1421,8 +1403,7 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
-  it("keeps the negative-prompt field off the node surface when a selected Model supports it", async () => {
-    const user = userEvent.setup();
+  it("keeps the negative-prompt field off the node surface when a selected Model supports it", () => {
     renderNode({
       prompt: "",
       history: { entries: [], activeId: null },
@@ -1435,8 +1416,6 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
       },
     });
 
-    expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
@@ -1488,7 +1467,6 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
     await waitFor(() => {
       expect(screen.queryByText(/select a model to configure/i)).not.toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
@@ -1507,8 +1485,7 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
-  it("does not show a saved negative-prompt value on the node surface", async () => {
-    const user = userEvent.setup();
+  it("does not show a saved negative-prompt value on the node surface", () => {
     renderNode({
       prompt: "",
       history: { entries: [], activeId: null },
@@ -1522,7 +1499,6 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
       negativePrompt: "blurry, low quality",
     });
 
-    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
