@@ -131,6 +131,145 @@ describe("ImageGenerationNode layout", () => {
     expect(prompt).toHaveValue("a cat");
   });
 
+  it("uses a media-first card with stable preview space and compact generation metadata", () => {
+    renderNode({
+      prompt: "a cat",
+      history: {
+        entries: [
+          {
+            id: "a",
+            prompt: "a cat",
+            output: { kind: "image", url: "https://fal.media/a.png" },
+            actualCost: 0.16,
+          },
+        ],
+        activeId: "a",
+      },
+      model: {
+        ...testModel,
+        pricing: { unitPrice: 0.08, unit: "images", currency: "USD" },
+      },
+    });
+
+    const node = document.querySelector('[data-node-id="n1"]') as HTMLElement;
+    const preview = within(node).getByLabelText("Image generation preview");
+    expect(preview).toHaveClass("aspect-square");
+    expect(within(preview).getByRole("img", { name: /output/i })).toHaveAttribute(
+      "src",
+      "https://fal.media/a.png",
+    );
+    expect(within(node).getAllByText("FLUX.1 [dev]").length).toBeGreaterThan(0);
+    expect(within(node).getByText("Ready")).toBeInTheDocument();
+    expect(within(node).getByText("Est. ~$0.08")).toBeInTheDocument();
+    expect(within(node).getByText("$0.16")).toBeInTheDocument();
+  });
+
+});
+
+describe("ImageGenerationNode advanced drawer", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("opens and closes a node-level drawer with negative prompt, resolved prompt, model details, and full History", async () => {
+    const user = userEvent.setup();
+    renderNode({
+      prompt: "local prompt",
+      history: {
+        entries: [
+          {
+            id: "a",
+            prompt: "first prompt",
+            output: { kind: "image", url: "https://fal.media/a.png" },
+            actualCost: 0.1,
+          },
+          {
+            id: "b",
+            prompt: "second prompt",
+            output: { kind: "image", url: "https://fal.media/b.png" },
+            actualCost: 0.3,
+          },
+        ],
+        activeId: "b",
+      },
+      model: {
+        ...testModel,
+        endpointId: "fal-ai/has-negative-prompt",
+        name: "Has Negative Prompt",
+        hasNegativePrompt: true,
+        pricing: { unitPrice: 0.1, unit: "images", currency: "USD" },
+      },
+      negativePrompt: "blurry",
+    });
+
+    expect(screen.queryByLabelText("Negative prompt")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
+    const drawer = screen.getByRole("region", { name: "Advanced image generation settings" });
+    expect(within(drawer).getByLabelText("Negative prompt")).toHaveValue("blurry");
+    expect(within(drawer).getByText("local prompt")).toBeInTheDocument();
+    expect(within(drawer).getByText("fal-ai/has-negative-prompt")).toBeInTheDocument();
+    expect(within(drawer).getByText("first prompt")).toBeInTheDocument();
+    expect(within(drawer).getByText("second prompt")).toBeInTheDocument();
+    expect(within(drawer).getByText("$0.10")).toBeInTheDocument();
+    expect(within(drawer).getByText("$0.30")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close advanced settings" }));
+    expect(screen.queryByRole("region", { name: "Advanced image generation settings" })).not.toBeInTheDocument();
+  });
+
+  it("edits the negative prompt through the advanced drawer and writes it to node data", async () => {
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "imageGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: {
+            prompt: "",
+            history: { entries: [], activeId: null },
+            model: {
+              endpointId: "fal-ai/has-negative-prompt",
+              name: "Has Negative Prompt",
+              category: "text-to-image",
+              handles: [],
+              hasNegativePrompt: true,
+            },
+          },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
+    await user.type(screen.getByLabelText("Negative prompt"), "blurry, low quality");
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
+      expect(data.negativePrompt).toBe("blurry, low quality");
+    });
+  });
 });
 
 describe("ImageGenerationNode generation", () => {
@@ -1246,7 +1385,8 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
-  it("shows the negative-prompt field once a selected Model's schema has hasNegativePrompt: true", () => {
+  it("shows the negative-prompt field in the advanced drawer once a selected Model's schema has hasNegativePrompt: true", async () => {
+    const user = userEvent.setup();
     renderNode({
       prompt: "",
       history: { entries: [], activeId: null },
@@ -1259,6 +1399,8 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
       },
     });
 
+    expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
     expect(screen.getByLabelText(/negative prompt/i)).toBeInTheDocument();
   });
 
@@ -1309,7 +1451,11 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
     const picker = screen.getByRole("combobox", { name: /model/i });
     await user.selectOptions(picker, "fal-ai/has-negative-prompt");
 
-    expect(await screen.findByLabelText(/negative prompt/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText(/select a model to configure/i)).not.toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
+    expect(screen.getByLabelText(/negative prompt/i)).toBeInTheDocument();
   });
 
   it("does not show the field for a Model whose schema lacks negative_prompt", async () => {
@@ -1373,6 +1519,7 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
       </ReactFlowProvider>,
     );
 
+    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
     const field = screen.getByLabelText(/negative prompt/i);
     await user.type(field, "blurry, low quality");
 
@@ -1382,7 +1529,8 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
     });
   });
 
-  it("persists the negative-prompt value on reload", () => {
+  it("persists the negative-prompt value on reload", async () => {
+    const user = userEvent.setup();
     renderNode({
       prompt: "",
       history: { entries: [], activeId: null },
@@ -1396,6 +1544,7 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
       negativePrompt: "blurry, low quality",
     });
 
+    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
     expect(screen.getByLabelText(/negative prompt/i)).toHaveValue("blurry, low quality");
   });
 
