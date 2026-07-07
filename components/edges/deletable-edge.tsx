@@ -8,8 +8,10 @@ import {
   useReactFlow,
   type EdgeProps,
 } from "@xyflow/react";
-import { X } from "lucide-react";
+import { Image as ImageIcon, Video, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { DataType } from "@/lib/connection-rules";
+import { BADGE_CLASSES, DATA_TYPE_TREATMENTS } from "@/lib/visual-system";
 
 // DeletableEdge (ADR-0004 / issue #19): the app's first custom edge type,
 // wired in as edgeTypes = { default: DeletableEdge } on CanvasEditor's
@@ -34,9 +36,19 @@ export function DeletableEdge({
   style,
   markerStart,
   markerEnd,
+  data,
 }: EdgeProps) {
   const { deleteElements } = useReactFlow();
   const [hovered, setHovered] = useState(false);
+  const dataType = edgeDataType(data);
+  const treatment = dataType ? DATA_TYPE_TREATMENTS[dataType] : null;
+  const semanticStyle = dataType
+    ? {
+        stroke: `var(--data-${dataType}-border)`,
+        strokeWidth: 2.5,
+        strokeDasharray: edgeStrokeDasharray(dataType),
+      }
+    : {};
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -51,7 +63,10 @@ export function DeletableEdge({
       <BaseEdge
         id={id}
         path={edgePath}
-        style={style}
+        style={{
+          ...style,
+          ...semanticStyle,
+        }}
         markerStart={markerStart}
         markerEnd={markerEnd}
         interactionWidth={20}
@@ -66,6 +81,7 @@ export function DeletableEdge({
         fill="none"
         strokeOpacity={0}
         strokeWidth={20}
+        data-edge-data-type={dataType}
         data-testid="deletable-edge-interaction"
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -81,7 +97,7 @@ export function DeletableEdge({
           }}
           className="nodrag nopan"
         >
-          {hovered && (
+          {hovered ? (
             <button
               type="button"
               aria-label="Delete edge"
@@ -92,9 +108,44 @@ export function DeletableEdge({
             >
               <X className="size-3" aria-hidden="true" />
             </button>
-          )}
+          ) : treatment && dataType ? (
+            <span
+              aria-label={`${treatment.label} edge`}
+              className={cn(
+                BADGE_CLASSES,
+                "pointer-events-none h-5 min-w-5 justify-center px-1 text-[10px] shadow-sm ring-2 ring-white",
+                treatment.classes,
+              )}
+            >
+              <EdgeDataTypeGlyph dataType={dataType} />
+            </span>
+          ) : null}
         </div>
       </EdgeLabelRenderer>
     </>
   );
+}
+
+function edgeDataType(data: EdgeProps["data"]): DataType | undefined {
+  const maybeDataType = (data as { dataType?: unknown } | undefined)?.dataType;
+  return maybeDataType === "text" || maybeDataType === "image" || maybeDataType === "video"
+    ? maybeDataType
+    : undefined;
+}
+
+function edgeStrokeDasharray(dataType: DataType): string | undefined {
+  if (dataType === "text") return "3 5";
+  if (dataType === "video") return "8 4";
+  return undefined;
+}
+
+function EdgeDataTypeGlyph({ dataType }: { dataType: DataType }) {
+  switch (dataType) {
+    case "text":
+      return <span aria-hidden="true">T</span>;
+    case "image":
+      return <ImageIcon aria-hidden="true" className="h-3 w-3" />;
+    case "video":
+      return <Video aria-hidden="true" className="h-3 w-3" />;
+  }
 }

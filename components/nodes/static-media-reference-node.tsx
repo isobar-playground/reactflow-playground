@@ -21,7 +21,7 @@ import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
 import { useNodeActions } from "@/components/nodes/use-node-actions";
 import { listAssetsAction, uploadAssetAction } from "@/app/library-actions";
 import type { Asset } from "@/lib/asset-library";
-import { DATA_TYPE_TREATMENTS, INPUT_CLASSES, SURFACE_CLASSES } from "@/lib/visual-system";
+import { BADGE_CLASSES, DATA_TYPE_TREATMENTS, INPUT_CLASSES, SURFACE_CLASSES } from "@/lib/visual-system";
 
 export type StaticMediaReferenceNodeData = {
   asset: Asset | null;
@@ -70,6 +70,7 @@ export function StaticMediaReferenceNode({ id, data }: NodeProps<StaticMediaRefe
   }>({ open: false, typeHint: undefined });
   const { open: pickerOpen, typeHint: stickyTypeHint } = picker;
   const asset = data.asset;
+  const mediaTreatment = asset ? DATA_TYPE_TREATMENTS[asset.type] : null;
 
   // ADR-0003: the output Handle only renders once data.asset is set — a
   // node-level change React Flow can't discover on its own (it only
@@ -104,27 +105,35 @@ export function StaticMediaReferenceNode({ id, data }: NodeProps<StaticMediaRefe
   }, [data.forcedOpenTypeHint, id, updateNodeData]);
 
   return (
-    <div className={`${SURFACE_CLASSES.card} studio-node w-64 rounded-lg p-3`} data-node-id={id}>
+    <div className={`${SURFACE_CLASSES.card} studio-node w-72 rounded-lg p-3`} data-node-id={id}>
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">Static Media Reference</span>
+        <span className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Media source</span>
         <NodeActionsMenu onDuplicate={duplicate} onDelete={remove} />
       </div>
 
       {asset ? (
-        <div className="relative mb-2 overflow-hidden rounded-md bg-muted">
-          {asset.type === "video" ? (
-            <video src={asset.url} className="aspect-square w-full object-cover" controls />
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={asset.url} alt={asset.name} className="aspect-square w-full object-cover" />
-          )}
-          <span className={`pointer-events-none absolute left-2 top-2 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${DATA_TYPE_TREATMENTS[asset.type].classes}`}>
-            {DATA_TYPE_TREATMENTS[asset.type].label}
-          </span>
+        <div className="mb-2 overflow-hidden rounded-md border border-[var(--studio-border)] bg-muted">
+          <div className="relative bg-[var(--studio-canvas)]">
+            {asset.type === "video" ? (
+              <video src={asset.url} className="aspect-video w-full object-cover" controls />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={asset.url} alt={asset.name} className="aspect-video w-full object-cover" />
+            )}
+            {mediaTreatment && (
+              <span className={`pointer-events-none absolute left-2 top-2 ${BADGE_CLASSES} text-[10px] ${mediaTreatment.classes}`}>
+                {mediaTreatment.label}
+              </span>
+            )}
+          </div>
+          <div className="truncate border-t border-[var(--studio-border)] bg-[var(--studio-card)] px-2 py-1.5 text-xs font-medium text-[var(--studio-ink)]">
+            {asset.name}
+          </div>
         </div>
       ) : (
-        <div className="mb-2 flex aspect-square w-full items-center justify-center rounded-md border border-dashed border-[var(--studio-border)] bg-muted text-sm text-muted-foreground">
-          No asset chosen
+        <div className="mb-2 flex aspect-video w-full flex-col items-center justify-center gap-1 rounded-md border border-dashed border-[var(--studio-border-strong)] bg-[var(--studio-canvas)] px-3 text-center">
+          <span className="text-sm font-medium text-[var(--studio-ink)]">Select an asset</span>
+          <span className="text-xs text-muted-foreground">Image or video</span>
         </div>
       )}
 

@@ -30,6 +30,14 @@ function renderEdge(edgeOverrides: Partial<Edge> = {}) {
 }
 
 describe("DeletableEdge", () => {
+  it("renders semantic data-type treatment when the edge carries a data type", () => {
+    const { container, getByLabelText } = renderEdge({ data: { dataType: "video" } });
+
+    expect(getByLabelText("video edge")).toBeInTheDocument();
+    expect(container.querySelector('[data-edge-data-type="video"]')).toBeInTheDocument();
+    expect(container.querySelector("svg.lucide-video")).toBeInTheDocument();
+  });
+
   it("hides the delete button before hover", () => {
     const { queryByRole } = renderEdge();
 

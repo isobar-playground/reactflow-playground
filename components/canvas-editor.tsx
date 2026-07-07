@@ -121,6 +121,37 @@ function targetHandlesOf(node: Node): Record<string, TargetHandleSpec> | undefin
   return resolved;
 }
 
+function sourceDataType(node: Node | undefined): DataType | undefined {
+  if (!node?.type) return undefined;
+  if (node.type === "staticMediaReference") return sourceMediaDataType(node) ?? undefined;
+  return SOURCE_DATA_TYPE[node.type as NodeTypeKey] ?? undefined;
+}
+
+function edgeDataTypeFromConnection(connection: { source: string }, nodes: Node[]): DataType | undefined {
+  return sourceDataType(nodes.find((node) => node.id === connection.source));
+}
+
+function withEdgeDataType(connection: Connection, nodes: Node[]): Edge | Connection {
+  const dataType = edgeDataTypeFromConnection(connection, nodes);
+  if (!dataType) return connection;
+  const existingData =
+    "data" in connection && typeof connection.data === "object" && connection.data !== null
+      ? connection.data
+      : {};
+  return {
+    ...connection,
+    data: { ...existingData, dataType },
+  };
+}
+
+function withEdgeDataTypes(edges: Edge[], nodes: Node[]): Edge[] {
+  return edges.map((edge) => {
+    const dataType = edgeDataTypeFromConnection(edge, nodes);
+    if (!dataType) return edge;
+    return { ...edge, data: { ...edge.data, dataType } };
+  });
+}
+
 function graphNodes(canvas: Canvas): Node[] {
   const nodes = canvas.graph.nodes;
   return Array.isArray(nodes) ? (nodes as Node[]) : [];
@@ -128,7 +159,8 @@ function graphNodes(canvas: Canvas): Node[] {
 
 function graphEdges(canvas: Canvas): Edge[] {
   const edges = canvas.graph.edges;
-  return Array.isArray(edges) ? (edges as Edge[]) : [];
+  if (!Array.isArray(edges)) return [];
+  return withEdgeDataTypes(edges as Edge[], graphNodes(canvas));
 }
 
 function graphViewport(canvas: Canvas): Viewport {
@@ -339,7 +371,7 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
             target: originNodeId,
             targetHandle: originHandleId,
           };
-    setEdges((eds) => addEdge(connection, eds));
+    setEdges((eds) => addEdge(withEdgeDataType(connection, nodes), eds));
   }
 
   // ADR-0003: a Handle-Spawned Static Media Reference's edge is created here
@@ -362,9 +394,9 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
               targetHandle: null,
             }
           : { source: nodeId, sourceHandle: null, target: pending.originNodeId, targetHandle: pending.originHandleId };
-      setEdges((eds) => addEdge(connection, eds));
+      setEdges((eds) => addEdge(withEdgeDataType(connection, nodes), eds));
     },
-    [setEdges],
+    [nodes, setEdges],
   );
 
   // Fires handleMediaSpawnAssetChosen once the pending Handle-Spawned Static
@@ -408,7 +440,7 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
       target: pending.nodeId,
       targetHandle: handle.handleId,
     };
-    setEdges((eds) => addEdge(connection, eds));
+    setEdges((eds) => addEdge(withEdgeDataType(connection, nodes), eds));
   }, [nodes, setEdges]);
 
   // connection-rules only knows about node/handle types, not React Flow's
@@ -575,7 +607,7 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
               onEdgesChange={onEdgesChange}
               isValidConnection={isValidConnection}
               onConnect={(connection: Connection) => {
-                setEdges((eds) => addEdge(connection, eds));
+                setEdges((eds) => addEdge(withEdgeDataType(connection, nodes), eds));
               }}
               onConnectEnd={onConnectEnd}
               deleteKeyCode={["Backspace", "Delete"]}

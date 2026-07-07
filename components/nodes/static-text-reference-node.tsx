@@ -4,7 +4,7 @@ import { Position, useReactFlow, type NodeProps, type Node } from "@xyflow/react
 import { HandleBadge } from "@/components/nodes/handle-badge";
 import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
 import { useNodeActions } from "@/components/nodes/use-node-actions";
-import { INPUT_CLASSES, SURFACE_CLASSES } from "@/lib/visual-system";
+import { BADGE_CLASSES, DATA_TYPE_TREATMENTS, INPUT_CLASSES, SURFACE_CLASSES } from "@/lib/visual-system";
 
 export type StaticTextReferenceNodeData = {
   text: string;
@@ -23,16 +23,23 @@ export type StaticTextReferenceNodeType = Node<StaticTextReferenceNodeData, "sta
 export function StaticTextReferenceNode({ id, data }: NodeProps<StaticTextReferenceNodeType>) {
   const { updateNodeData } = useReactFlow();
   const { duplicate, remove } = useNodeActions(id);
+  const textTreatment = DATA_TYPE_TREATMENTS.text;
 
   return (
-    <div className={`${SURFACE_CLASSES.card} studio-node w-64 rounded-lg p-3`}>
+    <div
+      className={`${SURFACE_CLASSES.card} studio-node w-56 rounded-lg border-l-4 border-l-[var(--data-text-border)] p-2.5`}
+      data-node-id={id}
+    >
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">Static Text Reference</span>
+        <span className={`${BADGE_CLASSES} ${textTreatment.classes}`}>
+          <span aria-hidden="true">T</span>
+          Text source
+        </span>
         <NodeActionsMenu onDuplicate={duplicate} onDelete={remove} />
       </div>
       <textarea
-        className={`${INPUT_CLASSES} nodrag w-full resize-none p-2`}
-        rows={4}
+        className={`${INPUT_CLASSES} nodrag min-h-20 w-full resize-none p-2 leading-snug`}
+        rows={3}
         value={data.text}
         onChange={(event) => updateNodeData(id, { text: event.target.value })}
         data-node-id={id}

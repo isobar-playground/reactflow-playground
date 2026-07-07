@@ -61,6 +61,15 @@ function renderNode(data: { text: string } = { text: "" }) {
 }
 
 describe("StaticTextReferenceNode", () => {
+  it("presents itself as a compact text source", () => {
+    const { container } = renderNode({ text: "hello" });
+
+    const node = container.querySelector('[data-node-id="n1"]');
+    expect(node).toHaveClass("w-56");
+    expect(screen.getByText("Text source")).toBeInTheDocument();
+    expect(screen.getAllByText("T").length).toBeGreaterThan(0);
+  });
+
   it("renders a textarea for entering text", () => {
     renderNode({ text: "hello" });
 

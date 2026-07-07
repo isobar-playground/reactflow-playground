@@ -93,6 +93,8 @@ describe("StaticMediaReferenceNode layout", () => {
     renderNode();
 
     expect(screen.getByRole("button", { name: /choose asset/i })).toBeInTheDocument();
+    expect(screen.getByText("Select an asset")).toBeInTheDocument();
+    expect(screen.getByText("Image or video")).toBeInTheDocument();
   });
 
   it("displays the chosen image asset", () => {
@@ -102,6 +104,8 @@ describe("StaticMediaReferenceNode layout", () => {
 
     const image = screen.getByRole("img", { name: "cat.png" });
     expect(image).toHaveAttribute("src", "https://blob.example/cat.png");
+    expect(screen.getByText("cat.png")).toBeInTheDocument();
+    expect(screen.getByText("image")).toBeInTheDocument();
   });
 
   it("displays the chosen video asset with a video element", () => {
@@ -112,6 +116,8 @@ describe("StaticMediaReferenceNode layout", () => {
     const video = container.querySelector("video");
     expect(video).not.toBeNull();
     expect(video).toHaveAttribute("src", "https://blob.example/clip.mp4");
+    expect(screen.getByText("clip.mp4")).toBeInTheDocument();
+    expect(screen.getByText("video")).toBeInTheDocument();
   });
 });
 
