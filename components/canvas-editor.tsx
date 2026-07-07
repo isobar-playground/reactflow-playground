@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ReactFlow,
   Background,
@@ -16,9 +16,11 @@ import {
   type ReactFlowInstance,
   type IsValidConnection,
   type OnConnectEnd,
+  type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import Link from "next/link";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { AddNodeContextMenuContent, EmptyCanvasMenu } from "@/components/add-node-menu";
@@ -29,6 +31,10 @@ import {
 } from "@/components/nodes/static-media-reference-node";
 import { ImageGenerationNode } from "@/components/nodes/image-generation-node";
 import { VideoGenerationNode } from "@/components/nodes/video-generation-node";
+import {
+  GenerationNodeRuntimeProvider,
+  type GenerationNodeRuntimeState,
+} from "@/components/nodes/generation-node-runtime";
 import { DeletableEdge } from "@/components/edges/deletable-edge";
 import { saveCanvasGraphAction, renameCanvasAction } from "@/app/canvas-actions";
 import { debounce } from "@/lib/debounce";
@@ -44,6 +50,8 @@ import { resolveSpawnCandidates, type SpawnCandidate } from "@/lib/handle-spawn"
 import { firstCompatibleHandle } from "@/lib/edge-reconcile";
 import { totalActualCost } from "@/lib/canvas-cost";
 import { formatActualCost } from "@/lib/actual-cost";
+import { modelCategoryLabel } from "@/lib/generation-mode";
+import { resolvedPrompt } from "@/lib/resolved-prompt";
 import type { Canvas } from "@/lib/canvas-repo";
 import type { ImageGenerationNodeData } from "@/components/nodes/image-generation-node";
 import type { VideoGenerationNodeData } from "@/components/nodes/video-generation-node";
@@ -66,6 +74,50 @@ const nodeTypes = {
 const edgeTypes = {
   default: DeletableEdge,
 };
+
+type GenerationNode =
+  | Node<ImageGenerationNodeData, "imageGeneration">
+  | Node<VideoGenerationNodeData, "videoGeneration">;
+
+function isGenerationNode(node: Node): node is GenerationNode {
+  return node.type === "imageGeneration" || node.type === "videoGeneration";
+}
+
+function generationNodeTitle(node: GenerationNode): string {
+  return node.type === "imageGeneration" ? "Image Generation Node" : "Video Generation Node";
+}
+
+function statusOfGenerationNode(
+  data: ImageGenerationNodeData | VideoGenerationNodeData,
+  runtime?: GenerationNodeRuntimeState,
+): string {
+  if (runtime?.isGenerating) return "Generating";
+  if (errorMessagesOfGenerationNode(data, runtime).length > 0) return "Error";
+  return data.pendingGeneration ? "Pending" : "Ready";
+}
+
+function errorMessagesOfGenerationNode(
+  data: ImageGenerationNodeData | VideoGenerationNodeData,
+  runtime?: GenerationNodeRuntimeState,
+): string[] {
+  const looseData = data as { generationError?: unknown; error?: unknown };
+  const messages = [runtime?.error, looseData.generationError, looseData.error].filter(
+    (message): message is string => typeof message === "string" && message.trim().length > 0,
+  );
+  return messages;
+}
+
+function resolvedPromptForGenerationNode(node: GenerationNode, nodes: Node[], edges: Edge[]): string {
+  const data = node.data;
+  const connectedTexts = edges
+    .filter((edge) => edge.target === node.id && edge.targetHandle === "text")
+    .map((edge) => {
+      const sourceNode = nodes.find((candidate) => candidate.id === edge.source);
+      const sourceData = sourceNode?.data as { text?: unknown } | undefined;
+      return typeof sourceData?.text === "string" ? sourceData.text : "";
+    });
+  return resolvedPrompt(connectedTexts, data.prompt);
+}
 
 // A Static Media Reference's output type isn't fixed per node type (it's
 // image or video depending on the chosen asset), so connection-rules can't
@@ -484,6 +536,37 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
   // own aggregate — so it updates live as generations complete, variants
   // land, and nodes are deleted, with no extra bookkeeping.
   const totalCost = useMemo(() => totalActualCost(nodes), [nodes]);
+  const selectedGenerationNode = useMemo(
+    () => nodes.find((node): node is GenerationNode => Boolean(node.selected) && isGenerationNode(node)),
+    [nodes],
+  );
+  const [generationRuntime, setGenerationRuntime] = useState<Record<string, GenerationNodeRuntimeState>>({});
+  const setGenerationNodeRuntime = useCallback((nodeId: string, state: GenerationNodeRuntimeState) => {
+    setGenerationRuntime((current) => {
+      const previous = current[nodeId];
+      if (previous?.isGenerating === state.isGenerating && previous.error === state.error) {
+        return current;
+      }
+      return { ...current, [nodeId]: state };
+    });
+  }, []);
+  const generationRuntimeContext = useMemo(
+    () => ({ setGenerationNodeRuntime }),
+    [setGenerationNodeRuntime],
+  );
+  const [closedDrawerNodeId, setClosedDrawerNodeId] = useState<string | null>(null);
+  const drawerOpen = Boolean(
+    selectedGenerationNode && closedDrawerNodeId !== selectedGenerationNode.id,
+  );
+  const handleNodesChange = useCallback(
+    (changes: NodeChange<Node>[]) => {
+      if (changes.some((change) => change.type === "select" && change.selected)) {
+        setClosedDrawerNodeId(null);
+      }
+      onNodesChange(changes);
+    },
+    [onNodesChange],
+  );
 
   const persist = useMemo(
     () =>
@@ -585,63 +668,206 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
         </div>
       </header>
       <div className="relative flex-1">
-        <ContextMenu>
-          <ContextMenuTrigger
-            className="block h-full w-full"
-            onContextMenu={(event) => {
-              if (!reactFlowInstance) return;
-              pendingSpawnPosition.current = reactFlowInstance.screenToFlowPosition({
-                x: event.clientX,
-                y: event.clientY,
-              });
-            }}
-          >
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              defaultViewport={initialViewport}
-              onInit={setReactFlowInstance}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              isValidConnection={isValidConnection}
-              onConnect={(connection: Connection) => {
-                setEdges((eds) => addEdge(withEdgeDataType(connection, nodes), eds));
+        <GenerationNodeRuntimeProvider value={generationRuntimeContext}>
+          <ContextMenu>
+            <ContextMenuTrigger
+              className="block h-full w-full"
+              onContextMenu={(event) => {
+                if (!reactFlowInstance) return;
+                pendingSpawnPosition.current = reactFlowInstance.screenToFlowPosition({
+                  x: event.clientX,
+                  y: event.clientY,
+                });
               }}
-              onConnectEnd={onConnectEnd}
-              deleteKeyCode={["Backspace", "Delete"]}
-              onMoveEnd={(_, viewport) => {
-                viewportRef.current = viewport;
-                persist(currentGraph());
-              }}
-              className="studio-grid"
             >
-              <Background color="var(--studio-grid)" gap={18} size={1.3} />
-              <Controls />
-            </ReactFlow>
-          </ContextMenuTrigger>
-          <AddNodeContextMenuContent
-            onSelect={(type) => {
-              addNode(type, pendingSpawnPosition.current ?? centreOfCanvas());
-              pendingSpawnPosition.current = null;
-            }}
-          />
-        </ContextMenu>
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                defaultViewport={initialViewport}
+                onInit={setReactFlowInstance}
+                onNodesChange={handleNodesChange}
+                onEdgesChange={onEdgesChange}
+                isValidConnection={isValidConnection}
+                onConnect={(connection: Connection) => {
+                  setEdges((eds) => addEdge(withEdgeDataType(connection, nodes), eds));
+                }}
+                onConnectEnd={onConnectEnd}
+                deleteKeyCode={["Backspace", "Delete"]}
+                onMoveEnd={(_, viewport) => {
+                  viewportRef.current = viewport;
+                  persist(currentGraph());
+                }}
+                className="studio-grid"
+              >
+                <Background color="var(--studio-grid)" gap={18} size={1.3} />
+                <Controls />
+              </ReactFlow>
+            </ContextMenuTrigger>
+            <AddNodeContextMenuContent
+              onSelect={(type) => {
+                addNode(type, pendingSpawnPosition.current ?? centreOfCanvas());
+                pendingSpawnPosition.current = null;
+              }}
+            />
+          </ContextMenu>
 
-        {shouldShowEmptyCanvasMenu(nodes.length) && (
-          <EmptyCanvasMenu onSelect={(type) => addNode(type, centreOfCanvas())} />
-        )}
+          {shouldShowEmptyCanvasMenu(nodes.length) && (
+            <EmptyCanvasMenu onSelect={(type) => addNode(type, centreOfCanvas())} />
+          )}
 
-        {pendingSpawn && (
-          <SpawnPickerMenu
-            screenPosition={pendingSpawn.screenPosition}
-            candidates={pendingSpawn.candidates}
-            onSelect={handleSpawnSelect}
-            onDismiss={() => setPendingSpawn(null)}
-          />
-        )}
+          {pendingSpawn && (
+            <SpawnPickerMenu
+              screenPosition={pendingSpawn.screenPosition}
+              candidates={pendingSpawn.candidates}
+              onSelect={handleSpawnSelect}
+              onDismiss={() => setPendingSpawn(null)}
+            />
+          )}
+
+          {selectedGenerationNode &&
+            drawerOpen && (
+              <NodeDetailsDrawer
+                node={selectedGenerationNode}
+                nodes={nodes}
+                edges={edges}
+                runtime={generationRuntime[selectedGenerationNode.id]}
+                onClose={() =>
+                  setClosedDrawerNodeId(selectedGenerationNode.id)
+                }
+              />
+            )}
+        </GenerationNodeRuntimeProvider>
       </div>
+    </div>
+  );
+}
+
+function NodeDetailsDrawer({
+  node,
+  nodes,
+  edges,
+  runtime,
+  onClose,
+}: {
+  node: GenerationNode;
+  nodes: Node[];
+  edges: Edge[];
+  runtime?: GenerationNodeRuntimeState;
+  onClose: () => void;
+}) {
+  const data = node.data;
+  const model = data.model;
+  const history = data.history;
+  const errors = errorMessagesOfGenerationNode(data, runtime);
+  const prompt = resolvedPromptForGenerationNode(node, nodes, edges);
+
+  return (
+    <aside
+      role="region"
+      aria-label="Node details drawer"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+      className={`${SURFACE_CLASSES.panel} absolute top-3 right-3 bottom-3 z-20 flex w-[23rem] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-lg`}
+    >
+      <div className="flex items-start justify-between gap-3 border-b border-[var(--studio-border)] px-4 py-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-semibold text-[var(--studio-ink)]">
+            {generationNodeTitle(node)}
+          </h2>
+          <p className="truncate text-xs text-muted-foreground">
+            {model?.name ?? "No model selected"}
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-label="Close node details drawer"
+          onClick={onClose}
+          className="flex size-8 shrink-0 items-center justify-center rounded-md border border-[var(--studio-border)] bg-[var(--studio-input)] text-muted-foreground transition-colors hover:border-[var(--studio-border-strong)] hover:bg-[var(--studio-control-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)]"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 text-sm">
+        <DrawerSection title="Status">
+          <p className="font-medium text-[var(--studio-ink)]">{statusOfGenerationNode(data, runtime)}</p>
+        </DrawerSection>
+
+        <DrawerSection title="Resolved Prompt">
+          <p className="break-words text-muted-foreground">{prompt || "No prompt text"}</p>
+        </DrawerSection>
+
+        <DrawerSection title="Model Details">
+          <dl className="space-y-2 text-xs text-muted-foreground">
+            <DrawerDetail label="Name" value={model?.name ?? "None"} />
+            <DrawerDetail label="Endpoint" value={model?.endpointId ?? "None"} />
+            <DrawerDetail label="Category" value={model ? modelCategoryLabel(model.category) : "None"} />
+          </dl>
+        </DrawerSection>
+
+        <DrawerSection title="Errors">
+          {errors.length > 0 ? (
+            <ul className="space-y-1 text-xs text-destructive">
+              {errors.map((error) => (
+                <li key={error}>{error}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">No errors</p>
+          )}
+        </DrawerSection>
+
+        <DrawerSection title="Full History">
+          {history.entries.length > 0 ? (
+            <ol className="space-y-3">
+              {history.entries.map((entry, index) => {
+                const cost = formatActualCost(entry.actualCost);
+                return (
+                  <li
+                    key={entry.id}
+                    className="rounded-md border border-[var(--studio-border)] bg-muted p-3 text-xs"
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2 text-muted-foreground">
+                      <span>Entry {index + 1}</span>
+                      <span>{entry.id === history.activeId ? "Active Output" : ""}</span>
+                    </div>
+                    <p className="mb-2 break-words text-[var(--studio-ink)]">{entry.prompt}</p>
+                    <dl className="space-y-1 text-muted-foreground">
+                      <DrawerDetail label="Output" value={entry.output.url} />
+                      <DrawerDetail label="Actual Cost" value={cost ?? "Unavailable"} />
+                    </dl>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            <p className="text-xs text-muted-foreground">No History yet</p>
+          )}
+        </DrawerSection>
+      </div>
+    </aside>
+  );
+}
+
+function DrawerSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-normal text-muted-foreground">
+        {title}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+function DrawerDetail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[6rem_1fr] gap-2">
+      <dt>{label}</dt>
+      <dd className="min-w-0 break-words text-[var(--studio-ink)]">{value}</dd>
     </div>
   );
 }

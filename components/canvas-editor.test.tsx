@@ -5,6 +5,7 @@ import * as libraryActions from "@/app/library-actions";
 import * as canvasActions from "@/app/canvas-actions";
 import * as modelsActions from "@/app/models-actions";
 import * as falSchema from "@/lib/fal-schema";
+import * as realGeneration from "@/lib/real-generation";
 import { CanvasEditor } from "./canvas-editor";
 import type { Canvas } from "@/lib/canvas-repo";
 import nanoBanana2EditSchema from "@/lib/__fixtures__/nano-banana-2-edit.json";
@@ -297,6 +298,269 @@ describe("CanvasEditor running total of Actual Cost (issue #42)", () => {
     await waitFor(() => {
       expect(screen.queryByLabelText("Total cost")).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("CanvasEditor Node Details Drawer", () => {
+  it("opens a canvas-level drawer for the selected Image Generation Node with inspection details", async () => {
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "ref1",
+              type: "staticTextReference",
+              position: { x: 0, y: 0 },
+              data: { text: "reference prompt" },
+            },
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 400, y: 0 },
+              data: {
+                prompt: "local prompt",
+                history: {
+                  entries: [
+                    {
+                      id: "h1",
+                      prompt: "first prompt",
+                      output: { kind: "image", url: "https://fal.media/first.png" },
+                      actualCost: 0.1,
+                    },
+                    {
+                      id: "h2",
+                      prompt: "second prompt",
+                      output: { kind: "image", url: "https://fal.media/second.png" },
+                      actualCost: 0.3,
+                    },
+                  ],
+                  activeId: "h2",
+                },
+                model: {
+                  endpointId: "fal-ai/flux/dev",
+                  name: "FLUX.1 Dev",
+                  category: "text-to-image",
+                  handles: [],
+                  hasNegativePrompt: false,
+                },
+              },
+            },
+          ],
+          edges: [{ id: "e1", source: "ref1", target: "gen1", targetHandle: "text" }],
+        })}
+      />,
+    );
+
+    await screen.findByText("reference prompt local prompt");
+
+    const node = container.querySelector('.react-flow__node[data-id="gen1"]') as HTMLElement;
+    fireEvent.click(node);
+
+    const drawer = await screen.findByRole("region", { name: "Node details drawer" });
+    expect(within(drawer).getByRole("heading", { name: "Image Generation Node" })).toBeInTheDocument();
+    expect(within(drawer).getByText("Ready")).toBeInTheDocument();
+    expect(within(drawer).getByText("reference prompt local prompt")).toBeInTheDocument();
+    expect(within(drawer).getAllByText("FLUX.1 Dev")).toHaveLength(2);
+    expect(within(drawer).getByText("fal-ai/flux/dev")).toBeInTheDocument();
+    expect(within(drawer).getByText("No errors")).toBeInTheDocument();
+    expect(within(drawer).getByText("first prompt")).toBeInTheDocument();
+    expect(within(drawer).getByText("second prompt")).toBeInTheDocument();
+    expect(within(drawer).getByText("$0.10")).toBeInTheDocument();
+    expect(within(drawer).getByText("$0.30")).toBeInTheDocument();
+  });
+
+  it("updates for a selected Video Generation Node and hides for non-Generation selections", async () => {
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "ref1",
+              type: "staticTextReference",
+              position: { x: 0, y: 0 },
+              data: { text: "reference text" },
+            },
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 350, y: 0 },
+              data: {
+                prompt: "image prompt",
+                history: { entries: [], activeId: null },
+                model: {
+                  endpointId: "fal-ai/flux/dev",
+                  name: "FLUX.1 Dev",
+                  category: "text-to-image",
+                  handles: [],
+                  hasNegativePrompt: false,
+                },
+              },
+            },
+            {
+              id: "gen2",
+              type: "videoGeneration",
+              position: { x: 750, y: 0 },
+              data: {
+                prompt: "video prompt",
+                history: {
+                  entries: [
+                    {
+                      id: "vh1",
+                      prompt: "video history prompt",
+                      output: { kind: "video", url: "https://fal.media/video.mp4" },
+                      actualCost: 0.4,
+                    },
+                  ],
+                  activeId: "vh1",
+                },
+                model: {
+                  endpointId: "fal-ai/kling-video/v3",
+                  name: "Kling Video v3",
+                  category: "text-to-video",
+                  handles: [],
+                  hasNegativePrompt: false,
+                },
+              },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    await screen.findByDisplayValue("image prompt");
+
+    fireEvent.click(container.querySelector('.react-flow__node[data-id="gen1"]') as HTMLElement);
+    let drawer = await screen.findByRole("region", { name: "Node details drawer" });
+    expect(within(drawer).getByRole("heading", { name: "Image Generation Node" })).toBeInTheDocument();
+    expect(within(drawer).getAllByText("FLUX.1 Dev")).toHaveLength(2);
+
+    fireEvent.click(container.querySelector('.react-flow__node[data-id="gen2"]') as HTMLElement);
+    drawer = await screen.findByRole("region", { name: "Node details drawer" });
+    expect(within(drawer).getByRole("heading", { name: "Video Generation Node" })).toBeInTheDocument();
+    expect(within(drawer).getAllByText("Kling Video v3")).toHaveLength(2);
+    expect(within(drawer).getByText("fal-ai/kling-video/v3")).toBeInTheDocument();
+    expect(within(drawer).getByText("Ready")).toBeInTheDocument();
+    expect(within(drawer).getByText("video history prompt")).toBeInTheDocument();
+    expect(within(drawer).getByText("$0.40")).toBeInTheDocument();
+
+    fireEvent.click(container.querySelector('.react-flow__node[data-id="ref1"]') as HTMLElement);
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Node details drawer" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("closes without mutating the selected node details and can be dismissed from keyboard focus", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 0, y: 0 },
+              data: {
+                prompt: "local prompt",
+                history: {
+                  entries: [
+                    {
+                      id: "h1",
+                      prompt: "first prompt",
+                      output: { kind: "image", url: "https://fal.media/first.png" },
+                      actualCost: 0.1,
+                    },
+                    {
+                      id: "h2",
+                      prompt: "second prompt",
+                      output: { kind: "image", url: "https://fal.media/second.png" },
+                      actualCost: 0.3,
+                    },
+                  ],
+                  activeId: "h2",
+                },
+                model: {
+                  endpointId: "fal-ai/flux/dev",
+                  name: "FLUX.1 Dev",
+                  category: "text-to-image",
+                  handles: [],
+                  hasNegativePrompt: false,
+                },
+              },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    await screen.findByDisplayValue("local prompt");
+
+    fireEvent.click(container.querySelector('.react-flow__node[data-id="gen1"]') as HTMLElement);
+    const drawer = await screen.findByRole("region", { name: "Node details drawer" });
+    const closeButton = within(drawer).getByRole("button", { name: "Close node details drawer" });
+    closeButton.focus();
+    expect(closeButton).toHaveFocus();
+    await user.tab();
+    expect(closeButton).not.toHaveFocus();
+    closeButton.focus();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Node details drawer" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByDisplayValue("local prompt")).toBeInTheDocument();
+    expect(screen.getAllByText("FLUX.1 Dev")).toHaveLength(2);
+    expect(screen.getByAltText("Generation output")).toHaveAttribute(
+      "src",
+      "https://fal.media/second.png",
+    );
+    expect(screen.getAllByAltText("History entry")).toHaveLength(2);
+    expect(screen.getByLabelText("Total cost")).toHaveTextContent("$0.40");
+  });
+
+  it("updates the selected drawer when generation fails on the node", async () => {
+    vi.spyOn(realGeneration, "runImageGeneration").mockRejectedValue(new Error("FAL queue rejected"));
+    const user = userEvent.setup();
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 0, y: 0 },
+              data: {
+                prompt: "local prompt",
+                history: { entries: [], activeId: null },
+                model: {
+                  endpointId: "fal-ai/flux/dev",
+                  name: "FLUX.1 Dev",
+                  category: "text-to-image",
+                  handles: [],
+                  hasNegativePrompt: false,
+                },
+              },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    await screen.findByDisplayValue("local prompt");
+    fireEvent.click(container.querySelector('.react-flow__node[data-id="gen1"]') as HTMLElement);
+
+    let drawer = await screen.findByRole("region", { name: "Node details drawer" });
+    expect(within(drawer).getByText("No errors")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await screen.findByRole("alert");
+
+    drawer = screen.getByRole("region", { name: "Node details drawer" });
+    expect(within(drawer).getByText("Error")).toBeInTheDocument();
+    expect(within(drawer).getByText("FAL queue rejected")).toBeInTheDocument();
   });
 });
 

@@ -13,6 +13,7 @@ import {
 } from "@xyflow/react";
 import { HandleBadge } from "@/components/nodes/handle-badge";
 import { focusFirstDescendant, trapFocusWithin } from "@/components/nodes/focus-management";
+import { useGenerationNodeRuntime } from "@/components/nodes/generation-node-runtime";
 import { ModelPicker, type ApprovedPickerModel } from "@/components/nodes/model-picker";
 import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
 import { useNodeActions } from "@/components/nodes/use-node-actions";
@@ -210,6 +211,14 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
 
   const { getNode, getEdges, setEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
   const { duplicate, remove } = useNodeActions(id);
+  const { setGenerationNodeRuntime } = useGenerationNodeRuntime();
+
+  useEffect(() => {
+    setGenerationNodeRuntime(id, { isGenerating, error: generationError });
+    return () => {
+      setGenerationNodeRuntime(id, { isGenerating: false, error: null });
+    };
+  }, [id, isGenerating, generationError, setGenerationNodeRuntime]);
 
   useEffect(() => {
     if (!advancedOpen || !advancedPanelRef.current) return;
