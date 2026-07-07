@@ -7,6 +7,10 @@ import { modelsForKind } from "@/lib/model-filter";
 import { fetchModelInputSchema, deriveInputHandles, type DeriveInputHandlesResult } from "@/lib/fal-schema";
 import { fetchModelPricing, fetchPricingBatch, fetchPricingChunk, type ModelPricing } from "@/lib/fal-pricing";
 
+export type ApprovedModel = Model & {
+  pricing?: ModelPricing | null;
+};
+
 export async function approveModelAction(endpointId: string) {
   await approveModel(endpointId);
   revalidatePath("/models");
@@ -22,7 +26,7 @@ export async function unapproveModelAction(endpointId: string) {
 // output kind (lib/model-filter.ts's modelsForKind) — name/thumbnail only,
 // no schema fetch. If FAL is unreachable the picker gets an empty list
 // rather than the whole node crashing (mirrors app/models/page.tsx).
-export async function approvedModelsForKind(kind: "image" | "video"): Promise<Model[]> {
+export async function approvedModelsForKind(kind: "image" | "video"): Promise<ApprovedModel[]> {
   const approvedIds = await listApprovedEndpointIds();
   let models: Model[];
   try {
@@ -30,7 +34,12 @@ export async function approvedModelsForKind(kind: "image" | "video"): Promise<Mo
   } catch {
     return [];
   }
-  return modelsForKind(models, kind).filter((m) => approvedIds.includes(m.endpointId));
+  const approved = modelsForKind(models, kind).filter((m) => approvedIds.includes(m.endpointId));
+  const pricingByEndpoint = await fetchPricingBatch(approved.map((model) => model.endpointId));
+  return approved.map((model) => ({
+    ...model,
+    pricing: pricingByEndpoint.get(model.endpointId) ?? null,
+  }));
 }
 
 export interface ModelSelectionResult extends DeriveInputHandlesResult {

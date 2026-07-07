@@ -537,8 +537,12 @@ describe("CanvasEditor drag-to-spawn (Handle-Spawned Node, issue #17)", () => {
 
     // Picking a Model whose schema exposes an image-compatible handle
     // (image_urls) resolves the deferred edge onto it.
-    const modelSelect = await screen.findByLabelText("Model");
-    await user.selectOptions(modelSelect, "fal-ai/nano-banana-2/edit");
+    await user.click(await screen.findByRole("button", { name: /image model picker/i }));
+    await user.click(
+      await screen.findByRole("option", {
+        name: (accessibleName) => accessibleName.includes("Nano Banana 2 Edit"),
+      }),
+    );
 
     await waitFor(() => {
       expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(1);
@@ -589,8 +593,12 @@ describe("CanvasEditor drag-to-spawn (Handle-Spawned Node, issue #17)", () => {
 
     // flux/schnell is text-to-image only — no image-accepting handle in its
     // schema — so the pending edge must be dropped, not attached anywhere.
-    const modelSelect = await screen.findByLabelText("Model");
-    await user.selectOptions(modelSelect, "fal-ai/flux/schnell");
+    await user.click(await screen.findByRole("button", { name: /image model picker/i }));
+    await user.click(
+      await screen.findByRole("option", {
+        name: (accessibleName) => accessibleName.includes("FLUX.1 [schnell]"),
+      }),
+    );
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(0);

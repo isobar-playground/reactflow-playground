@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { Settings2 } from "lucide-react";
 import {
   Position,
@@ -13,6 +12,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import { HandleBadge } from "@/components/nodes/handle-badge";
+import { ModelPicker, type ApprovedPickerModel } from "@/components/nodes/model-picker";
 import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
 import { useNodeActions } from "@/components/nodes/use-node-actions";
 import { runVideoGeneration, resumeVideoGeneration } from "@/lib/real-generation";
@@ -27,7 +27,6 @@ import { resolvedPrompt } from "@/lib/resolved-prompt";
 import { videoGenerationMode, videoGenerationModeLabel, modelCategoryLabel } from "@/lib/generation-mode";
 import { cloneVariants } from "@/lib/variant-clone";
 import { approvedModelsForKind, fetchModelSchemaAction } from "@/app/models-actions";
-import type { Model } from "@/lib/fal-models";
 import type { ResolvedHandle } from "@/lib/fal-schema";
 import type { MediaHandleConnection } from "@/lib/generation-payload";
 import { reconcileEdges, resolveEdgeDataTypeFromNodes } from "@/lib/edge-reconcile";
@@ -115,7 +114,7 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
   // Fetched once per node mount; the picker only ever needs to show
   // "Approved video-output Models," which doesn't change within a node's
   // lifetime on the canvas.
-  const [approvedModels, setApprovedModels] = useState<Model[] | null>(null);
+  const [approvedModels, setApprovedModels] = useState<ApprovedPickerModel[] | null>(null);
   useEffect(() => {
     let cancelled = false;
     void approvedModelsForKind("video").then((models) => {
@@ -381,6 +380,27 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
     updateNodeData(id, { history: setActiveEntry(history, entryId), prompt: selected.prompt });
   }
 
+  function handleSelectModel(chosen: ApprovedPickerModel) {
+    void fetchModelSchemaAction(chosen.endpointId).then(
+      ({ handles, hasNegativePrompt, pricing, defaultDurationSeconds }) => {
+        updateNodeData(id, {
+          model: {
+            endpointId: chosen.endpointId,
+            name: chosen.name,
+            category: chosen.category,
+            handles,
+            hasNegativePrompt,
+            pricing,
+            defaultDurationSeconds,
+          },
+        });
+        setEdges((edges) =>
+          reconcileEdges(edges, id, handles, resolveEdgeDataTypeFromNodes(getNode)),
+        );
+      },
+    );
+  }
+
   return (
     <div className={`${SURFACE_CLASSES.card} studio-node w-[26rem] rounded-xl p-3`} data-node-id={id}>
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -514,73 +534,19 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
           className={`${INPUT_CLASSES} nodrag w-16 p-1`}
         />
 
-        {/* Model picker (CONTEXT.md's Model / issue #31): lists Approved
-            video-output Models only. Selecting one writes endpointId, name
-            and category through to data.model (ADR-0002), and lazily
-            fetches that one endpoint's FAL input schema, derives its Input
-            Handles, and snapshots them alongside it (ADR-0008). The
-            snapshot is what the handles below render from; it's never
-            re-derived live on load. Re-selecting (issue #33 / ADR-0008):
-            recomputing the snapshot also reconciles this node's existing
-            input edges against the new handle set, silently dropping any
-            (per ADR-0004) whose handle is now absent or type-incompatible —
-            re-picking the same Model is a no-op since its handles are
-            unchanged. */}
-        {approvedModels && approvedModels.length > 0 && (
-          <select
-            aria-label="Model"
-            className={`${INPUT_CLASSES} nodrag flex-1 p-1`}
-            value={selectedModel?.endpointId ?? ""}
-            onChange={(event) => {
-              const chosen = approvedModels.find((m) => m.endpointId === event.target.value);
-              if (!chosen) {
-                updateNodeData(id, { model: null });
-                setEdges((edges) => reconcileEdges(edges, id, [], resolveEdgeDataTypeFromNodes(getNode)));
-                return;
-              }
-              void fetchModelSchemaAction(chosen.endpointId).then(
-                ({ handles, hasNegativePrompt, pricing, defaultDurationSeconds }) => {
-                  updateNodeData(id, {
-                    model: {
-                      endpointId: chosen.endpointId,
-                      name: chosen.name,
-                      category: chosen.category,
-                      handles,
-                      hasNegativePrompt,
-                      pricing,
-                      defaultDurationSeconds,
-                    },
-                  });
-                  setEdges((edges) =>
-                    reconcileEdges(edges, id, handles, resolveEdgeDataTypeFromNodes(getNode)),
-                  );
-                },
-              );
-            }}
-          >
-            <option value="">Select a model…</option>
-            {approvedModels.map((m) => (
-              <option key={m.endpointId} value={m.endpointId}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        )}
+        {/* Model picker (CONTEXT.md's Model / issue #58): lists Approved
+            video-output Models only in a rich popover. Selecting or
+            re-selecting a Model still lazily fetches that endpoint's FAL
+            input schema, snapshots its handles into node data, and
+            reconciles existing edges against the refreshed handle set. */}
+        <ModelPicker
+          kind="video"
+          models={approvedModels}
+          selectedModel={selectedModel}
+          onSelect={handleSelectModel}
+        />
       </div>
 
-      {/* No-model / empty-picker states (issue #31): a fetched-but-empty
-          catalog points the author at /models rather than showing a picker
-          with nothing in it; otherwise, an unselected picker gets a plain
-          text nudge alongside the dropdown above. */}
-      {approvedModels && approvedModels.length === 0 && (
-        <p className="mb-3 text-xs text-muted-foreground">
-          No approved video models yet — approve one on{" "}
-          <Link href="/models" className="underline">
-            /models
-          </Link>
-          .
-        </p>
-      )}
       {approvedModels && approvedModels.length > 0 && !selectedModel && (
         <p className="mb-3 text-xs text-muted-foreground">Select a model to configure this node.</p>
       )}

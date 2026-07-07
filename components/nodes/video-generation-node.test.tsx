@@ -102,6 +102,12 @@ function renderNode(
   ]);
 }
 
+async function chooseModel(user: ReturnType<typeof userEvent.setup>, name: string) {
+  const trigger = await screen.findByRole("button", { name: /video model picker/i });
+  await user.click(trigger);
+  await user.click(await screen.findByRole("option", { name: (accessibleName) => accessibleName.includes(name) }));
+}
+
 function renderWithNodes(nodes: Node[], edges: Edge[]) {
   return render(
     <ReactFlowProvider>
@@ -689,6 +695,7 @@ describe("VideoGenerationNode Model picker (issue #31)", () => {
     category: "image-to-video",
     description: "",
     tags: [],
+    thumbnailUrl: "https://fal.media/kling.png",
   };
   const veo: Model = {
     endpointId: "fal-ai/veo/text-to-video",
@@ -712,19 +719,26 @@ describe("VideoGenerationNode Model picker (issue #31)", () => {
   });
 
   it("lists only Approved video-output Models fetched via approvedModelsForKind", async () => {
-    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling, veo]);
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([
+      { ...kling, pricing: { unitPrice: 0.14, unit: "seconds", currency: "USD" } },
+      veo,
+    ]);
+    const user = userEvent.setup();
     renderNode();
 
     expect(modelsActions.approvedModelsForKind).toHaveBeenCalledWith("video");
-    expect(await screen.findByRole("option", { name: "Kling Video v3 Pro" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Veo Text-to-Video" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /video model picker/i }));
+    expect(await screen.findByRole("option", { name: /Kling Video v3 Pro/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Veo Text-to-Video/ })).toBeInTheDocument();
+    expect(screen.getByText(/image → video · kling · \$0.14 \/ second/i)).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /model/i })).not.toBeInTheDocument();
   });
 
   it("shows a 'select a model' state before a Model is chosen", async () => {
     vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling]);
     renderNode();
 
-    await screen.findByRole("option", { name: "Kling Video v3 Pro" });
+    await screen.findByRole("button", { name: /video model picker/i });
     expect(screen.getByText(/select a model to configure/i)).toBeInTheDocument();
   });
 
@@ -734,7 +748,7 @@ describe("VideoGenerationNode Model picker (issue #31)", () => {
 
     const hint = await screen.findByText(/no approved.*models/i);
     expect(hint).toBeInTheDocument();
-    const link = screen.getByRole("link", { name: /models/i });
+    const link = screen.getByRole("link", { name: /models workspace/i });
     expect(link).toHaveAttribute("href", "/models");
   });
 
@@ -773,9 +787,7 @@ describe("VideoGenerationNode Model picker (issue #31)", () => {
       </ReactFlowProvider>,
     );
 
-    await screen.findByRole("option", { name: "Kling Video v3 Pro" });
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/kling-video/v3/pro/image-to-video");
+    await chooseModel(user, "Kling Video v3 Pro");
 
     await waitFor(() => {
       const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
@@ -796,14 +808,30 @@ describe("VideoGenerationNode Model picker (issue #31)", () => {
     const user = userEvent.setup();
     renderNode();
 
-    await screen.findByRole("option", { name: "Kling Video v3 Pro" });
+    await screen.findByRole("button", { name: /video model picker/i });
     expect(screen.getByText("Text → Video")).toBeInTheDocument();
 
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/kling-video/v3/pro/image-to-video");
+    await chooseModel(user, "Kling Video v3 Pro");
 
     await waitFor(() => {
       expect(screen.getByText("Image → Video")).toBeInTheDocument();
+    });
+  });
+
+  it("supports keyboard navigation and returns focus to the Model picker trigger after selection", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling, veo]);
+    const user = userEvent.setup();
+    renderNode();
+
+    const trigger = await screen.findByRole("button", { name: /video model picker/i });
+    trigger.focus();
+    await user.keyboard("[Enter]");
+    expect(screen.getByRole("listbox", { name: /video model options/i })).toBeInTheDocument();
+    await user.keyboard("[Enter]");
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Kling Video v3 Pro").length).toBeGreaterThan(0);
+      expect(trigger).toHaveFocus();
     });
   });
 
@@ -945,9 +973,7 @@ describe("VideoGenerationNode schema-derived Input Handles (issue #31)", () => {
       </ReactFlowProvider>,
     );
 
-    await screen.findByRole("option", { name: "Kling Video v3 Pro" });
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/kling-video/v3/pro/image-to-video");
+    await chooseModel(user, "Kling Video v3 Pro");
 
     expect(fetchSchema).toHaveBeenCalledWith("fal-ai/kling-video/v3/pro/image-to-video");
 
@@ -1143,8 +1169,7 @@ describe("VideoGenerationNode edge reconciliation on Model change (issue #33)", 
 
     expect(getEdgesRef()()).toHaveLength(2);
 
-    const picker = await screen.findByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/text-to-video-only");
+    await chooseModel(user, "Text To Video Only");
 
     await waitFor(() => {
       expect(getEdgesRef()().map((e) => e.id)).toEqual(["e-text"]);
@@ -1163,8 +1188,7 @@ describe("VideoGenerationNode edge reconciliation on Model change (issue #33)", 
       hasNegativePrompt: false,
     });
 
-    const picker = await screen.findByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/kling-video/v3/pro/image-to-video");
+    await chooseModel(user, "Kling Video v3 Pro");
 
     await waitFor(() => {
       expect(getEdgesRef()().map((e) => e.id).sort()).toEqual(["e-media", "e-text"]);
@@ -1264,9 +1288,7 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
     const user = userEvent.setup();
     renderNode();
 
-    await screen.findByRole("option", { name: "Kling Video v3 Pro" });
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/kling-video/v3/pro/image-to-video");
+    await chooseModel(user, "Kling Video v3 Pro");
     await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
 
     expect(await screen.findByLabelText(/negative prompt/i)).toBeInTheDocument();
@@ -1279,9 +1301,7 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
     const user = userEvent.setup();
     renderNode();
 
-    await screen.findByRole("option", { name: "Veo" });
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/veo");
+    await chooseModel(user, "Veo");
 
     await waitFor(() => {
       expect(screen.queryByText(/select a model to configure/i)).not.toBeInTheDocument();

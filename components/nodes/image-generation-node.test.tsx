@@ -105,6 +105,12 @@ function renderNode(
   ]);
 }
 
+async function chooseModel(user: ReturnType<typeof userEvent.setup>, name: string) {
+  const trigger = await screen.findByRole("button", { name: /image model picker/i });
+  await user.click(trigger);
+  await user.click(await screen.findByRole("option", { name: (accessibleName) => accessibleName.includes(name) }));
+}
+
 describe("ImageGenerationNode layout", () => {
   it("renders a title, a prompt field, and a Generate button", () => {
     renderNode();
@@ -935,6 +941,7 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
     category: "text-to-image",
     description: "",
     tags: [],
+    thumbnailUrl: "https://fal.media/flux.png",
   };
   const editModel: Model = {
     endpointId: "fal-ai/edit/model",
@@ -959,19 +966,26 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
   });
 
   it("lists only Approved image-output Models fetched via approvedModelsForKind", async () => {
-    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([flux, editModel]);
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([
+      { ...flux, pricing: { unitPrice: 0.08, unit: "images", currency: "USD" } },
+      editModel,
+    ]);
+    const user = userEvent.setup();
     renderNode();
 
     expect(modelsActions.approvedModelsForKind).toHaveBeenCalledWith("image");
-    expect(await screen.findByRole("option", { name: "FLUX.1 [dev]" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Edit Model" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /image model picker/i }));
+    expect(await screen.findByRole("option", { name: /FLUX\.1 \[dev\]/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Edit Model/ })).toBeInTheDocument();
+    expect(screen.getByText(/text → image · flux · \$0.08 \/ image/i)).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /model/i })).not.toBeInTheDocument();
   });
 
   it("shows a 'select a model' state before a Model is chosen", async () => {
     vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([flux]);
     renderNode();
 
-    await screen.findByRole("option", { name: "FLUX.1 [dev]" });
+    await screen.findByRole("button", { name: /image model picker/i });
     expect(screen.getByText(/select a model to configure/i)).toBeInTheDocument();
   });
 
@@ -981,7 +995,7 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
 
     const hint = await screen.findByText(/no approved.*models/i);
     expect(hint).toBeInTheDocument();
-    const link = screen.getByRole("link", { name: /models/i });
+    const link = screen.getByRole("link", { name: /models workspace/i });
     expect(link).toHaveAttribute("href", "/models");
   });
 
@@ -1020,9 +1034,7 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
       </ReactFlowProvider>,
     );
 
-    await screen.findByRole("option", { name: "FLUX.1 [dev]" });
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/flux/dev");
+    await chooseModel(user, "FLUX.1 [dev]");
 
     await waitFor(() => {
       const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
@@ -1043,14 +1055,31 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
     const user = userEvent.setup();
     renderNode();
 
-    await screen.findByRole("option", { name: "FLUX.1 [dev]" });
+    await screen.findByRole("button", { name: /image model picker/i });
     expect(screen.getByText("Text → Image")).toBeInTheDocument();
 
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/edit/model");
+    await chooseModel(user, "Edit Model");
 
     await waitFor(() => {
       expect(screen.getByText("Image → Image")).toBeInTheDocument();
+    });
+  });
+
+  it("supports keyboard navigation and returns focus to the Model picker trigger after selection", async () => {
+    vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([flux, editModel]);
+    const user = userEvent.setup();
+    renderNode();
+
+    const trigger = await screen.findByRole("button", { name: /image model picker/i });
+    trigger.focus();
+    await user.keyboard("[Enter]");
+    const listbox = screen.getByRole("listbox", { name: /image model options/i });
+    expect(listbox).toBeInTheDocument();
+    await user.keyboard("[ArrowDown][Enter]");
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Edit Model").length).toBeGreaterThan(0);
+      expect(trigger).toHaveFocus();
     });
   });
 
@@ -1169,9 +1198,7 @@ describe("ImageGenerationNode schema-derived Input Handles (issue #30)", () => {
       </ReactFlowProvider>,
     );
 
-    await screen.findByRole("option", { name: "FLUX.1 [dev]" });
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/flux/dev");
+    await chooseModel(user, "FLUX.1 [dev]");
 
     expect(fetchSchema).toHaveBeenCalledWith("fal-ai/flux/dev");
 
@@ -1327,8 +1354,7 @@ describe("ImageGenerationNode edge reconciliation on Model change (issue #33)", 
 
     expect(getEdgesRef()()).toHaveLength(2);
 
-    const picker = await screen.findByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/flux/schnell");
+    await chooseModel(user, "FLUX.1 [schnell]");
 
     await waitFor(() => {
       const remaining = getEdgesRef()();
@@ -1350,8 +1376,7 @@ describe("ImageGenerationNode edge reconciliation on Model change (issue #33)", 
 
     // Re-selecting the SAME Model recomputes the snapshot but must be a
     // no-op for edges (issue #33 acceptance criteria).
-    const picker = await screen.findByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/nano-banana-2/edit");
+    await chooseModel(user, "Nano Banana 2 Edit");
 
     await waitFor(() => {
       expect(getEdgesRef()().map((e) => e.id).sort()).toEqual(["e-media", "e-text"]);
@@ -1447,9 +1472,7 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
     const user = userEvent.setup();
     renderNode();
 
-    await screen.findByRole("option", { name: "Has Negative Prompt" });
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/has-negative-prompt");
+    await chooseModel(user, "Has Negative Prompt");
 
     await waitFor(() => {
       expect(screen.queryByText(/select a model to configure/i)).not.toBeInTheDocument();
@@ -1465,9 +1488,7 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
     const user = userEvent.setup();
     renderNode();
 
-    await screen.findByRole("option", { name: "FLUX.1 [dev]" });
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.selectOptions(picker, "fal-ai/flux/dev");
+    await chooseModel(user, "FLUX.1 [dev]");
 
     await waitFor(() => {
       expect(screen.queryByText(/select a model to configure/i)).not.toBeInTheDocument();
