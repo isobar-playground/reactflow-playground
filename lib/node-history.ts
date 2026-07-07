@@ -26,6 +26,10 @@ export interface HistoryEntry {
   id: string;
   prompt: string;
   output: ImagePlaceholderResult | VideoPlaceholderResult;
+  // Creation timestamp for generated outputs appended after issue #52.
+  // Optional so older persisted History entries continue to load; dashboard
+  // code derives deterministic fallback recency for those legacy entries.
+  createdAt?: string;
   // Actual Cost (CONTEXT.md / ADR-0009, issue #41): what this one generation
   // really cost — billable units × the Model's snapshotted unit price
   // (lib/actual-cost.ts), computed once the run settles. Undefined for a
@@ -45,9 +49,10 @@ export interface NodeHistory {
 // Generate/Regenerate, even when the prompt is unchanged — every attempt is
 // kept, with no length limit.
 export function appendEntry(history: NodeHistory, entry: HistoryEntry): NodeHistory {
+  const timestampedEntry = entry.createdAt ? entry : { ...entry, createdAt: new Date().toISOString() };
   return {
-    entries: [...history.entries, entry],
-    activeId: entry.id,
+    entries: [...history.entries, timestampedEntry],
+    activeId: timestampedEntry.id,
   };
 }
 

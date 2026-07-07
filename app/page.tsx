@@ -12,7 +12,7 @@ export default async function Home() {
 
   return (
     <main className={`studio-shell min-h-screen w-full ${SURFACE_CLASSES.app}`}>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6 sm:p-8">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 sm:p-8">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold tracking-normal">React Flow Playground</h1>
         <div className="flex items-center gap-2">

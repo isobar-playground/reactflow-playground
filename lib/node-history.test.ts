@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { appendEntry, setActiveEntry, getActiveEntry, type NodeHistory, type HistoryEntry } from "./node-history";
 
 const emptyHistory: NodeHistory = { entries: [], activeId: null };
@@ -11,8 +11,32 @@ describe("appendEntry", () => {
   it("adds the entry to the list and makes it the active entry", () => {
     const history = appendEntry(emptyHistory, entry("a", "a cat"));
 
-    expect(history.entries).toEqual([entry("a", "a cat")]);
+    expect(history.entries).toEqual([
+      expect.objectContaining({ ...entry("a", "a cat"), createdAt: expect.any(String) }),
+    ]);
     expect(history.activeId).toBe("a");
+  });
+
+  it("adds a creation timestamp to new entries that do not have one yet", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-07T10:30:00.000Z"));
+
+    const history = appendEntry(emptyHistory, entry("a", "a cat"));
+
+    expect(history.entries[0].createdAt).toBe("2026-07-07T10:30:00.000Z");
+
+    vi.useRealTimers();
+  });
+
+  it("keeps an existing timestamp when restoring or cloning a history entry", () => {
+    const existing: HistoryEntry = {
+      ...entry("a", "a cat"),
+      createdAt: "2026-07-06T09:00:00.000Z",
+    };
+
+    const history = appendEntry(emptyHistory, existing);
+
+    expect(history.entries[0].createdAt).toBe("2026-07-06T09:00:00.000Z");
   });
 });
 
@@ -25,7 +49,10 @@ describe("setActiveEntry", () => {
     history = setActiveEntry(history, "a");
 
     expect(history.activeId).toBe("a");
-    expect(history.entries).toEqual([entry("a", "a cat"), entry("b", "a dog")]);
+    expect(history.entries).toEqual([
+      expect.objectContaining({ ...entry("a", "a cat"), createdAt: expect.any(String) }),
+      expect.objectContaining({ ...entry("b", "a dog"), createdAt: expect.any(String) }),
+    ]);
   });
 });
 
@@ -35,7 +62,9 @@ describe("getActiveEntry", () => {
     history = appendEntry(history, entry("b", "a dog"));
     history = setActiveEntry(history, "a");
 
-    expect(getActiveEntry(history)).toEqual(entry("a", "a cat"));
+    expect(getActiveEntry(history)).toEqual(
+      expect.objectContaining({ ...entry("a", "a cat"), createdAt: expect.any(String) }),
+    );
   });
 
   it("returns undefined when history is empty", () => {
@@ -52,7 +81,9 @@ describe("video outputs (issue #11)", () => {
     };
     const history = appendEntry(emptyHistory, videoEntry);
 
-    expect(getActiveEntry(history)).toEqual(videoEntry);
+    expect(getActiveEntry(history)).toEqual(
+      expect.objectContaining({ ...videoEntry, createdAt: expect.any(String) }),
+    );
   });
 });
 
