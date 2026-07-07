@@ -369,6 +369,173 @@ describe("CanvasEditor Node Details Drawer", () => {
     expect(within(drawer).getByText("$0.30")).toBeInTheDocument();
   });
 
+  it("edits an Image Generation Node negative prompt from the drawer and sends it on Generate", async () => {
+    const run = vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/out.png",
+    });
+    const user = userEvent.setup();
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 0, y: 0 },
+              data: {
+                prompt: "a cat",
+                history: { entries: [], activeId: null },
+                model: {
+                  endpointId: "fal-ai/flux/dev",
+                  name: "FLUX.1 Dev",
+                  category: "text-to-image",
+                  handles: [],
+                  hasNegativePrompt: true,
+                },
+              },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    await screen.findByDisplayValue("a cat");
+    const node = container.querySelector('.react-flow__node[data-id="gen1"]') as HTMLElement;
+    expect(within(node).queryByLabelText("Negative prompt")).not.toBeInTheDocument();
+    fireEvent.click(node);
+
+    const drawer = await screen.findByRole("region", { name: "Node details drawer" });
+    const field = within(drawer).getByLabelText("Negative prompt");
+    await user.type(field, "blurry, low quality");
+    const resolvedPromptSection = within(drawer).getByText("Resolved Prompt").closest("section") as HTMLElement;
+    expect(within(resolvedPromptSection).getByText("a cat")).toBeInTheDocument();
+    expect(within(resolvedPromptSection).queryByText("blurry, low quality")).not.toBeInTheDocument();
+
+    await user.click(within(node).getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          endpointId: "fal-ai/flux/dev",
+          prompt: "a cat",
+          negativePrompt: "blurry, low quality",
+        }),
+        expect.anything(),
+      );
+    });
+  });
+
+  it("edits a Video Generation Node negative prompt from the drawer and sends it on Regenerate", async () => {
+    const run = vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
+      kind: "video",
+      url: "https://fal.media/out.mp4",
+    });
+    const user = userEvent.setup();
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "gen1",
+              type: "videoGeneration",
+              position: { x: 0, y: 0 },
+              data: {
+                prompt: "a car",
+                history: {
+                  entries: [
+                    {
+                      id: "h1",
+                      prompt: "a car",
+                      output: { kind: "video", url: "https://fal.media/old.mp4" },
+                    },
+                  ],
+                  activeId: "h1",
+                },
+                model: {
+                  endpointId: "fal-ai/kling-video/v3",
+                  name: "Kling Video v3",
+                  category: "text-to-video",
+                  handles: [],
+                  hasNegativePrompt: true,
+                },
+              },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    await screen.findByDisplayValue("a car");
+    const node = container.querySelector('.react-flow__node[data-id="gen1"]') as HTMLElement;
+    expect(within(node).queryByLabelText("Negative prompt")).not.toBeInTheDocument();
+    fireEvent.click(node);
+
+    const drawer = await screen.findByRole("region", { name: "Node details drawer" });
+    await user.type(within(drawer).getByLabelText("Negative prompt"), "shaky, blurry");
+    await user.click(within(node).getByRole("button", { name: "Regenerate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          endpointId: "fal-ai/kling-video/v3",
+          prompt: "a car",
+          negativePrompt: "shaky, blurry",
+        }),
+        expect.anything(),
+      );
+    });
+  });
+
+  it("hides the negative prompt field for no Model and unsupported selected Models", async () => {
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "no-model",
+              type: "imageGeneration",
+              position: { x: 0, y: 0 },
+              data: {
+                prompt: "no model prompt",
+                history: { entries: [], activeId: null },
+              },
+            },
+            {
+              id: "unsupported",
+              type: "videoGeneration",
+              position: { x: 420, y: 0 },
+              data: {
+                prompt: "unsupported prompt",
+                history: { entries: [], activeId: null },
+                model: {
+                  endpointId: "fal-ai/veo",
+                  name: "Veo",
+                  category: "text-to-video",
+                  handles: [],
+                  hasNegativePrompt: false,
+                },
+              },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    await screen.findByDisplayValue("no model prompt");
+
+    fireEvent.click(container.querySelector('.react-flow__node[data-id="no-model"]') as HTMLElement);
+    let drawer = await screen.findByRole("region", { name: "Node details drawer" });
+    expect(within(drawer).queryByLabelText("Negative prompt")).not.toBeInTheDocument();
+
+    fireEvent.click(container.querySelector('.react-flow__node[data-id="unsupported"]') as HTMLElement);
+    drawer = await screen.findByRole("region", { name: "Node details drawer" });
+    expect(within(drawer).queryByLabelText("Negative prompt")).not.toBeInTheDocument();
+  });
+
   it("updates for a selected Video Generation Node and hides for non-Generation selections", async () => {
     const { container } = render(
       <CanvasEditor

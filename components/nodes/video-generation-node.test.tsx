@@ -228,7 +228,7 @@ describe("VideoGenerationNode advanced drawer", () => {
     vi.restoreAllMocks();
   });
 
-  it("opens and closes a node-level drawer with negative prompt, resolved prompt, model details, status, errors, and full History", async () => {
+  it("opens and closes a node-level drawer with resolved prompt, model details, status, errors, and full History", async () => {
     vi.spyOn(realGeneration, "runVideoGeneration").mockRejectedValue(new Error("FAL queue rejected"));
     const user = userEvent.setup();
     renderNode({
@@ -266,7 +266,7 @@ describe("VideoGenerationNode advanced drawer", () => {
 
     await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
     const drawer = screen.getByRole("region", { name: "Advanced video generation settings" });
-    expect(within(drawer).getByLabelText("Negative prompt")).toHaveValue("shaky");
+    expect(within(drawer).queryByLabelText("Negative prompt")).not.toBeInTheDocument();
     expect(within(drawer).getByText("local prompt")).toBeInTheDocument();
     expect(within(drawer).getByText("fal-ai/has-negative-prompt-video")).toBeInTheDocument();
     expect(within(drawer).getAllByText("Error").length).toBeGreaterThan(0);
@@ -278,59 +278,6 @@ describe("VideoGenerationNode advanced drawer", () => {
 
     await user.click(screen.getByRole("button", { name: "Close advanced settings" }));
     expect(screen.queryByRole("region", { name: "Advanced video generation settings" })).not.toBeInTheDocument();
-  });
-
-  it("edits the negative prompt through the advanced drawer and writes it to node data", async () => {
-    const user = userEvent.setup();
-    let getNodeRef: ((id: string) => Node | undefined) | undefined;
-
-    function TestCanvas() {
-      const [nodes, , onNodesChange] = useNodesState<Node>([
-        {
-          id: "n1",
-          type: "videoGeneration",
-          position: { x: 0, y: 0 },
-          initialWidth: 400,
-          initialHeight: 500,
-          data: {
-            prompt: "",
-            history: { entries: [], activeId: null },
-            model: {
-              endpointId: "fal-ai/has-negative-prompt-video",
-              name: "Has Negative Prompt Video",
-              category: "text-to-video",
-              handles: [],
-              hasNegativePrompt: true,
-            },
-          },
-        },
-      ]);
-      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
-      const { getNode } = useReactFlow();
-      getNodeRef = getNode as (id: string) => Node | undefined;
-      return (
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-        />
-      );
-    }
-    render(
-      <ReactFlowProvider>
-        <TestCanvas />
-      </ReactFlowProvider>,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
-    await user.type(screen.getByLabelText("Negative prompt"), "shaky, blurry");
-
-    await waitFor(() => {
-      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
-      expect(data.negativePrompt).toBe("shaky, blurry");
-    });
   });
 });
 
@@ -880,11 +827,10 @@ describe("VideoGenerationNode Model picker (issue #31)", () => {
     await user.click(trigger);
 
     const drawer = screen.getByRole("region", { name: "Advanced video generation settings" });
-    const negativePrompt = within(drawer).getByLabelText("Negative prompt");
-    await waitFor(() => expect(negativePrompt).toHaveFocus());
+    await waitFor(() => expect(drawer).toHaveFocus());
 
     await user.tab();
-    expect(negativePrompt).toHaveFocus();
+    expect(drawer).toHaveFocus();
 
     await user.keyboard("[Escape]");
     await waitFor(() => {
@@ -1282,7 +1228,7 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
-  it("shows the negative-prompt field in the advanced drawer once a selected Model's schema has hasNegativePrompt: true", async () => {
+  it("keeps the negative-prompt field off the node surface when a selected Model supports it", async () => {
     const user = userEvent.setup();
     renderNode({
       prompt: "",
@@ -1297,7 +1243,7 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
-    expect(screen.getByLabelText(/negative prompt/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
   it("hides the negative-prompt field for a selected Model whose schema has no negative_prompt", async () => {
@@ -1318,7 +1264,7 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
-  it("fetches the selected Model's schema and derives hasNegativePrompt, snapshotting it into node data", async () => {
+  it("fetches the selected Model's schema while keeping negative prompt off the node surface", async () => {
     vi.spyOn(modelsActions, "approvedModelsForKind").mockResolvedValue([kling]);
     vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({
       paths: {
@@ -1349,7 +1295,10 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
     await chooseModel(user, "Kling Video v3 Pro");
     await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
 
-    expect(await screen.findByLabelText(/negative prompt/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText(/select a model to configure/i)).not.toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
   it("does not show the field for a Model whose schema lacks negative_prompt", async () => {
@@ -1368,61 +1317,7 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
-  it("stores the negative-prompt value in node data via updateNodeData", async () => {
-    const user = userEvent.setup();
-    let getNodeRef: ((id: string) => Node | undefined) | undefined;
-
-    function TestCanvas() {
-      const [nodes, , onNodesChange] = useNodesState<Node>([
-        {
-          id: "n1",
-          type: "videoGeneration",
-          position: { x: 0, y: 0 },
-          initialWidth: 400,
-          initialHeight: 500,
-          data: {
-            prompt: "",
-            history: { entries: [], activeId: null },
-            model: {
-              endpointId: "fal-ai/kling-video/v3/pro/image-to-video",
-              name: "Kling Video v3 Pro",
-              category: "image-to-video",
-              handles: [],
-              hasNegativePrompt: true,
-            },
-          },
-        },
-      ]);
-      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
-      const { getNode } = useReactFlow();
-      getNodeRef = getNode as (id: string) => Node | undefined;
-      return (
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-        />
-      );
-    }
-    render(
-      <ReactFlowProvider>
-        <TestCanvas />
-      </ReactFlowProvider>,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
-    const field = screen.getByLabelText(/negative prompt/i);
-    await user.type(field, "blurry, low quality");
-
-    await waitFor(() => {
-      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
-      expect(data.negativePrompt).toBe("blurry, low quality");
-    });
-  });
-
-  it("persists the negative-prompt value on reload", async () => {
+  it("does not show a saved negative-prompt value on the node surface", async () => {
     const user = userEvent.setup();
     renderNode({
       prompt: "",
@@ -1438,7 +1333,7 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Open advanced settings" }));
-    expect(screen.getByLabelText(/negative prompt/i)).toHaveValue("blurry, low quality");
+    expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
   it("does not include the negative prompt in the Resolved Prompt preview", () => {

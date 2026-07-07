@@ -558,6 +558,18 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
   const drawerOpen = Boolean(
     selectedGenerationNode && closedDrawerNodeId !== selectedGenerationNode.id,
   );
+  const updateGenerationNodeNegativePrompt = useCallback(
+    (nodeId: string, negativePrompt: string) => {
+      setNodes((current) =>
+        current.map((node) =>
+          node.id === nodeId && isGenerationNode(node)
+            ? { ...node, data: { ...node.data, negativePrompt } }
+            : node,
+        ),
+      );
+    },
+    [setNodes],
+  );
   const handleNodesChange = useCallback(
     (changes: NodeChange<Node>[]) => {
       if (changes.some((change) => change.type === "select" && change.selected)) {
@@ -733,6 +745,9 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
                 nodes={nodes}
                 edges={edges}
                 runtime={generationRuntime[selectedGenerationNode.id]}
+                onNegativePromptChange={(negativePrompt) =>
+                  updateGenerationNodeNegativePrompt(selectedGenerationNode.id, negativePrompt)
+                }
                 onClose={() =>
                   setClosedDrawerNodeId(selectedGenerationNode.id)
                 }
@@ -749,12 +764,14 @@ function NodeDetailsDrawer({
   nodes,
   edges,
   runtime,
+  onNegativePromptChange,
   onClose,
 }: {
   node: GenerationNode;
   nodes: Node[];
   edges: Edge[];
   runtime?: GenerationNodeRuntimeState;
+  onNegativePromptChange: (negativePrompt: string) => void;
   onClose: () => void;
 }) {
   const data = node.data;
@@ -795,6 +812,22 @@ function NodeDetailsDrawer({
         <DrawerSection title="Status">
           <p className="font-medium text-[var(--studio-ink)]">{statusOfGenerationNode(data, runtime)}</p>
         </DrawerSection>
+
+        {model?.hasNegativePrompt && (
+          <DrawerSection title="Configuration">
+            <label className="block text-xs">
+              <span className="mb-1 block font-medium text-[var(--studio-ink)]">Negative prompt</span>
+              <textarea
+                aria-label="Negative prompt"
+                className={`${INPUT_CLASSES} w-full resize-none p-2`}
+                rows={3}
+                value={data.negativePrompt ?? ""}
+                onChange={(event) => onNegativePromptChange(event.target.value)}
+                placeholder="Negative prompt (optional)…"
+              />
+            </label>
+          </DrawerSection>
+        )}
 
         <DrawerSection title="Resolved Prompt">
           <p className="break-words text-muted-foreground">{prompt || "No prompt text"}</p>

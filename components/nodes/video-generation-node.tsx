@@ -601,20 +601,6 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
           }}
           className="nodrag mb-3 space-y-3 rounded-lg border border-[var(--studio-border)] bg-[var(--studio-panel)] p-3 text-xs"
         >
-          {selectedModel?.hasNegativePrompt && (
-            <label className="block">
-              <span className="mb-1 block font-medium text-[var(--studio-ink)]">Negative prompt</span>
-              <textarea
-                aria-label="Negative prompt"
-                className={`${INPUT_CLASSES} nodrag w-full resize-none p-2`}
-                rows={2}
-                value={data.negativePrompt ?? ""}
-                onChange={(event) => updateNodeData(id, { negativePrompt: event.target.value })}
-                placeholder="Negative prompt (optional)…"
-              />
-            </label>
-          )}
-
           <div className="rounded-md border border-[var(--studio-border)] bg-muted p-2">
             <div className="mb-1 font-medium text-[var(--studio-ink)]">Resolved Prompt</div>
             <div className="break-words text-muted-foreground">
