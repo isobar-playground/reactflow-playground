@@ -1,15 +1,20 @@
 import type { Edge, Node } from "@xyflow/react";
-import type { NodeHistory } from "./node-history";
+import { branchHistoryToActive, type NodeHistory } from "./node-history";
 
-// variant-clone (CONTEXT.md / issue #12): a Generation Node's variant count,
-// set above one and Generated, clones the node into that many independent
-// nodes. Each clone inherits only the original's incoming reference edges
-// (outgoing edges are never duplicated — CONTEXT.md), is laid out beside the
-// original with an offset, and starts with its own fresh History rather than
-// a copy of the original's. Pure/framework-agnostic like connection-rules.ts
-// and node-history.ts: the caller (the node component) supplies fresh ids
-// and each clone's freshly generated output, and pushes the result into the
-// canvas's node/edge state.
+// variant-clone (CONTEXT.md / issue #12, extended by PRD #69 / ADR-0013): a
+// Generation Node's variant count, set above one and Generated, clones the
+// node into that many independent nodes. Each clone inherits only the
+// original's incoming reference edges (outgoing edges are never duplicated —
+// CONTEXT.md), is laid out beside the original with an offset. Its inherited
+// History is the original's History up to its Active Output
+// (branchHistoryToActive): on a first-generation Variant that's still empty
+// (nothing yet to inherit), but on an Edit each clone continues the
+// original's chain up to the branch point rather than starting fresh — this
+// is how a branch (Variant, or an Edit taken from a non-newest entry) stays
+// on the canvas as a sibling node instead of turning a node's History into a
+// tree. Pure/framework-agnostic like connection-rules.ts and node-history.ts:
+// the caller (the node component) supplies fresh ids and each clone's own
+// generated output, and pushes the result into the canvas's node/edge state.
 
 const CLONE_OFFSET_X = 40;
 const CLONE_OFFSET_Y = 420;
@@ -21,13 +26,17 @@ export interface CloneResult {
 
 export function cloneVariants(original: Node, edges: Edge[], count: number): CloneResult {
   const incomingEdges = edges.filter((edge) => edge.target === original.id);
+  const originalHistory = (original.data as { history?: NodeHistory }).history ?? {
+    entries: [],
+    activeId: null,
+  };
+  const inheritedHistory = branchHistoryToActive(originalHistory);
 
   const clones: Node[] = [];
   const clonedEdges: Edge[] = [];
 
   for (let i = 0; i < count; i++) {
     const cloneId = crypto.randomUUID();
-    const emptyHistory: NodeHistory = { entries: [], activeId: null };
 
     clones.push({
       ...original,
@@ -38,7 +47,7 @@ export function cloneVariants(original: Node, edges: Edge[], count: number): Clo
       },
       data: {
         ...original.data,
-        history: emptyHistory,
+        history: inheritedHistory,
       },
       selected: false,
     });

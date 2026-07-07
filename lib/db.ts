@@ -21,6 +21,14 @@ const SCHEMA = [
     endpoint_id text        primary key,
     approved_at timestamptz not null    default now()
   )`,
+  // Edit Model pairing (CONTEXT.md's Edit Model, ADR-0014, PRD #69): the
+  // app-owned mapping from a text-to-image base Model to the image-to-image
+  // Model that runs its Edits, curated in the Models tab. Many bases may map
+  // to one Edit Model, so edit_endpoint_id carries no uniqueness constraint.
+  `create table if not exists model_edit_pairs (
+    base_endpoint_id text primary key,
+    edit_endpoint_id text not null
+  )`,
 ];
 
 export async function migrate(db: Db): Promise<void> {

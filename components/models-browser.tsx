@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   approveModelAction,
+  clearEditPairAction,
   fetchCatalogPricingAction,
   fetchCatalogPricingChunkAction,
+  setEditPairAction,
   unapproveModelAction,
 } from "@/app/models-actions";
 import {
@@ -32,6 +34,7 @@ const MAX_AUTO_PRICING_MODELS = 30;
 // didn't rate-limit — a successful chunk carries no Retry-After to go by.
 const MANUAL_LOAD_DELAY_SECONDS = 1;
 const EMPTY_APPROVED_IDS: string[] = [];
+const EMPTY_EDIT_PAIRS: Record<string, string> = {};
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -53,9 +56,13 @@ function chunk<T>(items: T[], size: number): T[][] {
 export function ModelsBrowser({
   models,
   approvedIds = EMPTY_APPROVED_IDS,
+  editPairs = EMPTY_EDIT_PAIRS,
 }: {
   models: Model[];
   approvedIds?: string[];
+  /** The app-owned text-to-image → Edit Model pairing (CONTEXT.md's Edit
+   * Model, ADR-0014, PRD #69), keyed by base endpoint id. */
+  editPairs?: Record<string, string>;
 }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<ModelCategory | "all">("all");
@@ -63,8 +70,31 @@ export function ModelsBrowser({
   const [approval, setApproval] = useState<ApprovalFilter>("all");
   const [sort, setSort] = useState<SortOrder>("newest");
   const [approvedEndpointIds, setApprovedEndpointIds] = useState(approvedIds);
+  const [editPairsState, setEditPairsState] = useState(editPairs);
 
   const approvedSet = useMemo(() => new Set(approvedEndpointIds), [approvedEndpointIds]);
+
+  // Edit Model options (CONTEXT.md's Edit Model, ADR-0014): only approved
+  // image-to-image Models can be paired as an Edit Model — mirrors
+  // lib/model-filter.ts's selectableBaseModels' "image-to-image always
+  // passes" stance, applied here to the *target* side of the pairing.
+  const editModelOptions = useMemo(
+    () => models.filter((m) => m.category === "image-to-image" && approvedSet.has(m.endpointId)),
+    [models, approvedSet],
+  );
+
+  function handleEditPairChange(baseEndpointId: string, editEndpointId: string | null) {
+    setEditPairsState((current) => {
+      const next = { ...current };
+      if (editEndpointId) {
+        next[baseEndpointId] = editEndpointId;
+      } else {
+        delete next[baseEndpointId];
+      }
+      return next;
+    });
+    void (editEndpointId ? setEditPairAction(baseEndpointId, editEndpointId) : clearEditPairAction(baseEndpointId));
+  }
 
   // Families to offer in the dropdown (>= 2 loaded Models — ADR-0010); a
   // singleton token has no dropdown option but stays reachable via the
@@ -291,6 +321,9 @@ export function ModelsBrowser({
                 approved={approvedSet.has(model.endpointId)}
                 pricing={pricingByEndpoint[model.endpointId]}
                 onApprovalChange={handleApprovalChange}
+                editModelEndpointId={editPairsState[model.endpointId]}
+                editModelOptions={editModelOptions}
+                onEditPairChange={handleEditPairChange}
               />
             ))}
           </ul>
@@ -305,11 +338,20 @@ function ModelCard({
   approved,
   pricing,
   onApprovalChange,
+  editModelEndpointId,
+  editModelOptions,
+  onEditPairChange,
 }: {
   model: Model;
   approved: boolean;
   pricing?: ModelPricing;
   onApprovalChange: (endpointId: string, next: boolean) => void;
+  /** This Model's currently paired Edit Model, if any (ADR-0014). Only
+   * meaningful for a text-to-image Model. */
+  editModelEndpointId?: string;
+  /** Approved image-to-image Models offered as this Model's Edit Model. */
+  editModelOptions: Model[];
+  onEditPairChange: (baseEndpointId: string, editEndpointId: string | null) => void;
 }) {
   // Unit Price (CONTEXT.md / ADR-0010 / issue #45): rendered verbatim when
   // resolvable, nothing when absent (never fetched, 429, outage, or above
@@ -370,6 +412,30 @@ function ModelCard({
         {model.description ? (
           <p className="line-clamp-2 text-sm text-muted-foreground">{model.description}</p>
         ) : null}
+        {/* Edit Model pairing (CONTEXT.md's Edit Model, ADR-0014, PRD #69):
+            only a text-to-image Model needs one — an image-to-image Model
+            already edits with itself. Only offered once approved, since an
+            unapproved Model can't be selected as a base at all. Unpaired is
+            surfaced explicitly (CONTEXT.md: "unpaired text-to-image models
+            are surfaced as not-yet-usable"). */}
+        {model.category === "text-to-image" && approved && (
+          <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-muted-foreground">
+            Edit Model
+            <select
+              aria-label={`Edit Model for ${model.name}`}
+              value={editModelEndpointId ?? ""}
+              onChange={(event) => onEditPairChange(model.endpointId, event.target.value || null)}
+              className={`${INPUT_CLASSES} py-1.5`}
+            >
+              <option value="">None — not yet usable as a base</option>
+              {editModelOptions.map((option) => (
+                <option key={option.endpointId} value={option.endpointId}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       <label className="flex w-fit items-center gap-2 rounded-full border border-[var(--studio-border-strong)] bg-[var(--studio-input)] px-3 py-1.5 text-sm font-medium sm:justify-self-end">
         <input

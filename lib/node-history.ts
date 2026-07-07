@@ -66,3 +66,22 @@ export function setActiveEntry(history: NodeHistory, id: string): NodeHistory {
 export function getActiveEntry(history: NodeHistory): HistoryEntry | undefined {
   return history.entries.find((entry) => entry.id === history.activeId);
 }
+
+// branchHistoryToActive (CONTEXT.md's Variant/Clone, ADR-0013): truncates a
+// History to the entries up to and including its Active Output, with that
+// entry as the new tip. Used when a branch point isn't the newest entry —
+// a Variant, or an Edit taken from a History entry that isn't newest — so
+// the branch (a sibling node, lib/variant-clone.ts) inherits the chain up
+// to where it diverged rather than the whole thing. Empty History (nothing
+// generated yet) is returned as-is: there's nothing yet to inherit before a
+// first generation (CONTEXT.md's Variant / Clone, "first-gen variants
+// behave unchanged"). Pure — never mutates its input.
+export function branchHistoryToActive(history: NodeHistory): NodeHistory {
+  const activeIndex = history.entries.findIndex((entry) => entry.id === history.activeId);
+  if (activeIndex === -1) return { entries: [], activeId: null };
+
+  return {
+    entries: history.entries.slice(0, activeIndex + 1),
+    activeId: history.activeId,
+  };
+}

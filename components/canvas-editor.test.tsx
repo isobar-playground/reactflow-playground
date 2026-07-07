@@ -24,6 +24,17 @@ vi.mock("@/app/models-actions", async (importOriginal) => {
   };
 });
 
+// fetchModelSchemaAction (unmocked above, so its real implementation runs
+// on Model selection here) now also reads the Edit Model pairing
+// (ADR-0014) via lib/model-edit-pairs.ts, which is DB-backed. Stubbed here
+// to an empty pairing so this DOM-focused suite never touches a real
+// database connection.
+vi.mock("@/lib/model-edit-pairs", () => ({
+  listEditPairs: vi.fn().mockResolvedValue({}),
+  setEditPair: vi.fn(),
+  clearEditPair: vi.fn(),
+}));
+
 function makeCanvas(graph: Record<string, unknown> = {}): Canvas {
   return {
     id: "canvas-1",

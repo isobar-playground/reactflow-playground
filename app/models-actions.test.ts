@@ -61,10 +61,15 @@ describe("models-actions — approvedModelsForKind", () => {
       }),
     );
 
-    const { approveModelAction } = await import("./models-actions");
+    const { approveModelAction, setEditPairAction } = await import("./models-actions");
     await approveModelAction("fal-ai/flux/dev");
     await approveModelAction("fal-ai/edit/model");
     await approveModelAction("fal-ai/kling/video");
+    // A text-to-image base needs a paired Edit Model to be selectable
+    // (CONTEXT.md's Edit Model, ADR-0014) — paired here so this test can
+    // stay focused on category narrowing; the pairing gate itself is
+    // covered by the next test.
+    await setEditPairAction("fal-ai/flux/dev", "fal-ai/edit/model");
 
     const { approvedModelsForKind } = await import("./models-actions");
     const result = await approvedModelsForKind("image");
@@ -73,6 +78,41 @@ describe("models-actions — approvedModelsForKind", () => {
       "fal-ai/edit/model",
       "fal-ai/flux/dev",
     ]);
+  });
+
+  it("excludes an approved text-to-image Model with no paired Edit Model (CONTEXT.md's Edit Model / ADR-0014)", async () => {
+    const flux = falEntry("fal-ai/flux/dev", "text-to-image", "FLUX.1 [dev]");
+    const editModel = falEntry("fal-ai/edit/model", "image-to-image", "Edit Model");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = new URL(String(input));
+        const category = url.searchParams.get("category");
+        const byCategory: Record<string, unknown[]> = {
+          "text-to-image": [flux],
+          "image-to-image": [editModel],
+          "text-to-video": [],
+          "image-to-video": [],
+          "video-to-video": [],
+        };
+        return new Response(
+          JSON.stringify({ models: byCategory[category ?? ""] ?? [], has_more: false }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    const { approveModelAction } = await import("./models-actions");
+    // Both approved, but flux is never paired — it can generate but never
+    // edit, so the picker must not offer it as a base.
+    await approveModelAction("fal-ai/flux/dev");
+    await approveModelAction("fal-ai/edit/model");
+
+    const { approvedModelsForKind } = await import("./models-actions");
+    const result = await approvedModelsForKind("image");
+
+    expect(result.map((m) => m.endpointId)).toEqual(["fal-ai/edit/model"]);
   });
 
   it("returns an empty list when FAL is unreachable", async () => {
@@ -121,6 +161,68 @@ describe("models-actions — fetchModelSchemaAction pricing snapshot (issue #37)
     const result = await fetchModelSchemaAction("fal-ai/does-not-exist");
 
     expect(result.pricing).toBeNull();
+  });
+});
+
+// fetchModelSchemaAction's Edit Model snapshot (CONTEXT.md's Edit Model,
+// ADR-0014, PRD #69): when the selected endpoint has a configured pairing,
+// the paired Edit Model's own schema/pricing is resolved and snapshotted
+// alongside — so a text-to-image base's first Edit never needs a live
+// fetch (extends ADR-0008's snapshot-at-selection stance).
+describe("models-actions — fetchModelSchemaAction Edit Model snapshot (ADR-0014)", () => {
+  beforeEach(async () => {
+    delete process.env.DATABASE_URL;
+    process.env.PGLITE_DIR = "memory://";
+    resetDbForTests();
+    await migrate(await getDb());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("resolves and snapshots the paired Edit Model when one is configured", async () => {
+    const { setEditPairAction, fetchModelSchemaAction } = await import("./models-actions");
+    await setEditPairAction("fal-ai/flux/dev", "fal-ai/nano-banana/edit");
+
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockImplementation(async (endpointId: string) =>
+      endpointId === "fal-ai/nano-banana/edit"
+        ? {
+            paths: {
+              "/fal-ai/nano-banana/edit": {
+                post: {
+                  requestBody: { content: { "application/json": { schema: { $ref: "#/components/schemas/Input" } } } },
+                },
+              },
+            },
+            components: { schemas: { Input: { properties: { image_url: { type: "string" } } } } },
+          }
+        : { paths: {}, components: {} },
+    );
+    vi.spyOn(falPricing, "fetchModelPricing").mockImplementation(async (endpointId: string) =>
+      endpointId === "fal-ai/nano-banana/edit"
+        ? { unitPrice: 0.05, unit: "images", currency: "USD" }
+        : null,
+    );
+
+    const result = await fetchModelSchemaAction("fal-ai/flux/dev");
+
+    expect(result.editModel).toEqual({
+      endpointId: "fal-ai/nano-banana/edit",
+      primaryImageHandleId: "image_url",
+      hasNegativePrompt: false,
+      pricing: { unitPrice: 0.05, unit: "images", currency: "USD" },
+    });
+  });
+
+  it("resolves editModel to null when the endpoint has no configured pairing", async () => {
+    vi.spyOn(falSchema, "fetchModelInputSchema").mockResolvedValue({ paths: {}, components: {} });
+    vi.spyOn(falPricing, "fetchModelPricing").mockResolvedValue(null);
+
+    const { fetchModelSchemaAction } = await import("./models-actions");
+    const result = await fetchModelSchemaAction("fal-ai/unpaired/model");
+
+    expect(result.editModel).toBeNull();
   });
 });
 

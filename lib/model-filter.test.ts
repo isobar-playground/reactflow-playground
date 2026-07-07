@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { filterModels, modelsForKind } from "./model-filter";
+import { filterModels, modelsForKind, selectableBaseModels } from "./model-filter";
 import type { Model } from "./fal-models";
 
 // A deliberately blank model so each query test isolates the one field it puts
@@ -235,6 +235,43 @@ describe("filterModels — family narrowing (issue #44)", () => {
     );
 
     expect(result).toEqual([target]);
+  });
+});
+
+describe("selectableBaseModels (CONTEXT.md's Edit Model / ADR-0014)", () => {
+  it("keeps a paired text-to-image model", () => {
+    const paired = model({ endpointId: "fal-ai/flux/dev", category: "text-to-image" });
+
+    expect(selectableBaseModels([paired], { "fal-ai/flux/dev": "fal-ai/nano-banana/edit" })).toEqual([paired]);
+  });
+
+  it("excludes an unpaired text-to-image model — it could generate but never edit", () => {
+    const unpaired = model({ endpointId: "fal-ai/flux/schnell", category: "text-to-image" });
+
+    expect(selectableBaseModels([unpaired], {})).toEqual([]);
+  });
+
+  it("always keeps image-to-image models — they edit with themselves", () => {
+    const composer = model({ endpointId: "fal-ai/some/compose", category: "image-to-image" });
+
+    expect(selectableBaseModels([composer], {})).toEqual([composer]);
+  });
+
+  it("leaves video-output categories unaffected — the pairing only governs image bases", () => {
+    const video = model({ endpointId: "fal-ai/kling/video", category: "text-to-video" });
+
+    expect(selectableBaseModels([video], {})).toEqual([video]);
+  });
+
+  it("composes with modelsForKind — an unpaired text-to-image model never reaches the image picker", () => {
+    const unpaired = model({ endpointId: "fal-ai/flux/schnell", category: "text-to-image" });
+    const paired = model({ endpointId: "fal-ai/flux/dev", category: "text-to-image" });
+    const composer = model({ endpointId: "fal-ai/some/compose", category: "image-to-image" });
+
+    const forImage = modelsForKind([unpaired, paired, composer], "image");
+    const result = selectableBaseModels(forImage, { "fal-ai/flux/dev": "fal-ai/nano-banana/edit" });
+
+    expect(result).toEqual([paired, composer]);
   });
 });
 

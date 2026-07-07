@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listModels } from "@/lib/fal-models";
 import { listApprovedEndpointIds } from "@/lib/model-approvals";
+import { listEditPairs } from "@/lib/model-edit-pairs";
 import { ModelsBrowser } from "@/components/models-browser";
 import { SURFACE_CLASSES } from "@/lib/visual-system";
 
@@ -9,9 +10,10 @@ import { SURFACE_CLASSES } from "@/lib/visual-system";
 export const dynamic = "force-dynamic";
 
 export default async function ModelsPage() {
-  // Approvals live in our DB (ADR-0006) and load independently of FAL, so they
-  // resolve even when the catalog fetch below fails.
-  const approvedIds = await listApprovedEndpointIds();
+  // Approvals and the Edit Model pairing (ADR-0014, PRD #69) both live in our
+  // DB (ADR-0006) and load independently of FAL, so they resolve even when
+  // the catalog fetch below fails.
+  const [approvedIds, editPairs] = await Promise.all([listApprovedEndpointIds(), listEditPairs()]);
 
   let models = null;
   let failed = false;
@@ -39,7 +41,7 @@ export default async function ModelsPage() {
           Couldn&apos;t load the model catalog from FAL. Please try again later.
         </p>
       ) : (
-        <ModelsBrowser models={models ?? []} approvedIds={approvedIds} />
+        <ModelsBrowser models={models ?? []} approvedIds={approvedIds} editPairs={editPairs} />
       )}
       </div>
     </main>

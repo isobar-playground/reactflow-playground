@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
-import { appendEntry, setActiveEntry, getActiveEntry, type NodeHistory, type HistoryEntry } from "./node-history";
+import {
+  appendEntry,
+  setActiveEntry,
+  getActiveEntry,
+  branchHistoryToActive,
+  type NodeHistory,
+  type HistoryEntry,
+} from "./node-history";
 
 const emptyHistory: NodeHistory = { entries: [], activeId: null };
 
@@ -105,6 +112,45 @@ describe("actualCost (CONTEXT.md's Actual Cost / issue #41)", () => {
     const history = appendEntry(emptyHistory, entry("a", "a cat"));
 
     expect(getActiveEntry(history)?.actualCost).toBeUndefined();
+  });
+});
+
+describe("branchHistoryToActive (CONTEXT.md's Variant/Clone / ADR-0013)", () => {
+  it("returns empty history unchanged — nothing yet to inherit before a first generation", () => {
+    expect(branchHistoryToActive(emptyHistory)).toEqual({ entries: [], activeId: null });
+  });
+
+  it("keeps the full chain when the active entry is already the newest", () => {
+    let history = appendEntry(emptyHistory, entry("a", "a cat"));
+    history = appendEntry(history, entry("b", "a dog"));
+
+    const branched = branchHistoryToActive(history);
+
+    expect(branched.entries.map((e) => e.id)).toEqual(["a", "b"]);
+    expect(branched.activeId).toBe("b");
+  });
+
+  it("truncates to the active entry as the new tip, dropping later entries", () => {
+    let history = appendEntry(emptyHistory, entry("a", "a cat"));
+    history = appendEntry(history, entry("b", "a dog"));
+    history = appendEntry(history, entry("c", "a bird"));
+    history = setActiveEntry(history, "a");
+
+    const branched = branchHistoryToActive(history);
+
+    expect(branched.entries.map((e) => e.id)).toEqual(["a"]);
+    expect(branched.activeId).toBe("a");
+  });
+
+  it("does not mutate the original history", () => {
+    let history = appendEntry(emptyHistory, entry("a", "a cat"));
+    history = appendEntry(history, entry("b", "a dog"));
+    history = setActiveEntry(history, "a");
+    const originalEntryCount = history.entries.length;
+
+    branchHistoryToActive(history);
+
+    expect(history.entries).toHaveLength(originalEntryCount);
   });
 });
 

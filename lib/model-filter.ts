@@ -83,6 +83,20 @@ export function modelsForKind(models: Model[], kind: "image" | "video"): Model[]
   return models.filter((m) => categories.has(m.category));
 }
 
+// selectableBaseModels (CONTEXT.md's Edit Model, ADR-0014, PRD #69): which
+// Approved Models a Generation Node's Model picker offers as a *base*. An
+// image-to-image Model is always selectable — it edits with itself, needing
+// no pairing. A text-to-image Model is selectable only once it has a paired
+// Edit Model configured in the Models tab: "A text-to-image Model with no
+// paired Edit Model cannot be selected as a base (it could generate but
+// never edit), so it is not offered in the Model picker." Every other
+// category (image-to-video, text-to-video, video-to-video) is untouched —
+// the Edit lifecycle is scoped to images only, so the pairing has no bearing
+// on a Video Generation Node's picker.
+export function selectableBaseModels(models: Model[], pairs: Record<string, string>): Model[] {
+  return models.filter((m) => m.category !== "text-to-image" || Boolean(pairs[m.endpointId]));
+}
+
 function matchesQuery(model: Model, query: string): boolean {
   if (!query) return true;
   const haystack = [

@@ -29,6 +29,17 @@ vi.mock("@/app/models-actions", async (importOriginal) => {
   };
 });
 
+// fetchModelSchemaAction (unmocked above, so its real implementation runs)
+// now also reads the Edit Model pairing (ADR-0014) via lib/model-edit-pairs.ts,
+// which is DB-backed. Stubbed here to an empty pairing so these DOM-focused
+// tests never touch a real database connection — mirrors how falSchema/
+// falPricing are stubbed per test below for the same "network-free" reason.
+vi.mock("@/lib/model-edit-pairs", () => ({
+  listEditPairs: vi.fn().mockResolvedValue({}),
+  setEditPair: vi.fn(),
+  clearEditPair: vi.fn(),
+}));
+
 vi.mock("@/lib/real-generation", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/real-generation")>();
   return {
@@ -169,7 +180,7 @@ describe("ImageGenerationNode layout", () => {
     expect(within(node).getByRole("spinbutton", { name: /variant/i })).toBeInTheDocument();
     expect(within(node).getByPlaceholderText(/prompt/i)).toBeInTheDocument();
 
-    const actionRow = within(node).getByRole("button", { name: "Regenerate" }).parentElement as HTMLElement;
+    const actionRow = within(node).getByRole("button", { name: "Edit" }).parentElement as HTMLElement;
     expect(within(actionRow).getByText("Est. ~$0.08")).toBeInTheDocument();
     expect(within(node).queryByText("Model")).not.toBeInTheDocument();
     expect(within(node).queryByText("Status")).not.toBeInTheDocument();
@@ -223,7 +234,7 @@ describe("ImageGenerationNode inline details", () => {
     expect(within(node).queryByLabelText("Negative prompt")).not.toBeInTheDocument();
     expect(within(node).getByPlaceholderText(/prompt/i)).toHaveValue("local prompt");
     expect(within(node).getByRole("spinbutton", { name: /variant/i })).toBeInTheDocument();
-    expect(within(node).getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
+    expect(within(node).getByRole("button", { name: "Edit" })).toBeInTheDocument();
     expect(within(node).getByLabelText("Image generation preview")).toBeInTheDocument();
   });
 });
@@ -255,7 +266,7 @@ describe("ImageGenerationNode generation", () => {
     expect(image).toHaveAttribute("src", "https://picsum.photos/seed/abc/768/768");
   });
 
-  it("changes the button label to Regenerate after the first output exists", async () => {
+  it("changes the button label to Edit after the first output exists (CONTEXT.md's Edit / PRD #69)", async () => {
     vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
       kind: "image",
       url: "https://picsum.photos/seed/abc/768/768",
@@ -265,7 +276,7 @@ describe("ImageGenerationNode generation", () => {
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
-    expect(await screen.findByRole("button", { name: "Regenerate" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Edit" })).toBeInTheDocument();
   });
 });
 
@@ -297,7 +308,7 @@ describe("ImageGenerationNode history carousel", () => {
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
     await screen.findByRole("img", { name: /output/i });
-    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     await waitFor(() => {
       expect(screen.getByRole("img", { name: /output/i })).toHaveAttribute(
         "src",
@@ -324,7 +335,7 @@ describe("ImageGenerationNode history carousel", () => {
 
     await user.clear(promptField);
     await user.type(promptField, "second prompt");
-    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     await waitFor(() => {
       expect(screen.getByRole("img", { name: /output/i })).toHaveAttribute(
         "src",
@@ -354,8 +365,8 @@ describe("ImageGenerationNode history carousel", () => {
     await user.click(screen.getByRole("button", { name: "Generate" }));
     await screen.findByRole("img", { name: /output/i });
     for (let i = 0; i < 4; i++) {
-      await user.click(screen.getByRole("button", { name: "Regenerate" }));
-      await screen.findByRole("button", { name: "Regenerate" });
+      await user.click(screen.getByRole("button", { name: "Edit" }));
+      await screen.findByRole("button", { name: "Edit" });
     }
 
     const thumbnails = screen.getAllByRole("img", { name: /history entry/i });
@@ -407,7 +418,7 @@ describe("ImageGenerationNode persistence", () => {
     expect(screen.getByPlaceholderText(/prompt/i)).toHaveValue("saved prompt");
     const image = screen.getByRole("img", { name: /output/i });
     expect(image).toHaveAttribute("src", "https://picsum.photos/seed/xyz/768/768");
-    expect(screen.getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
   });
 
   // ADR-0002: node `data` is the single source of truth for persisted canvas
@@ -552,7 +563,7 @@ describe("ImageGenerationNode persistence", () => {
 
     await user.clear(promptField);
     await user.type(promptField, "second prompt");
-    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     await waitFor(() => {
       const data = getNodeRef?.("n1")?.data as ImageGenerationNodeData;
       expect(data.history.entries).toHaveLength(2);
@@ -1053,6 +1064,10 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
         hasNegativePrompt: false,
         pricing: null,
         defaultDurationSeconds: undefined,
+        // No configured pairing for this endpoint (CONTEXT.md's Edit Model,
+        // ADR-0014, PRD #69) — the module-level mock above stubs the
+        // pairing repo to empty.
+        editModel: null,
       });
     });
   });
@@ -1883,7 +1898,7 @@ describe("ImageGenerationNode: the original runs its own variant generation (iss
     const counter = screen.getByRole("spinbutton", { name: /variant/i });
     await user.clear(counter);
     await user.type(counter, "2");
-    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
 
     // The original's prior entry is preserved, the new one is appended and
     // becomes the Active Output, and it records the original's own billed
@@ -1897,7 +1912,9 @@ describe("ImageGenerationNode: the original runs its own variant generation (iss
       expect(data.history.activeId).toBe(data.history.entries[1].id);
     });
 
-    // The clone's own single fresh output landed on the clone, not here.
+    // The clone's own single fresh output landed on the clone, not here — its
+    // History also carries the original's pre-variant entry up to the branch
+    // point (ADR-0013), so the clone now shows two entries.
     await waitFor(() => {
       const nodeContainers = Array.from(
         document.querySelectorAll<HTMLElement>(".react-flow__node[data-id]"),
@@ -1910,7 +1927,7 @@ describe("ImageGenerationNode: the original runs its own variant generation (iss
       );
       // …recording the clone's own Actual Cost (1 unit × $0.10), not the
       // original's — each variant's History entry carries its own billed cost.
-      expect(within(clone).getByText("$0.10")).toBeInTheDocument();
+      expect(within(clone).getByLabelText("Active output actual cost")).toHaveTextContent("$0.10");
     });
   });
 
@@ -2610,7 +2627,7 @@ describe("ImageGenerationNode Pending Output flow (issue #62)", () => {
     );
 
     const preview = screen.getByLabelText("Image generation preview");
-    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
 
     expect(within(preview).getByRole("img", { name: /output/i })).toHaveAttribute(
       "src",
@@ -2697,7 +2714,7 @@ describe("ImageGenerationNode Pending Output flow (issue #62)", () => {
       </ReactFlowProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Generation failed");
@@ -2771,7 +2788,7 @@ describe("ImageGenerationNode Pending Output flow (issue #62)", () => {
       </ReactFlowProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     await act(async () => {
       onPending?.(pending);
     });
@@ -2961,7 +2978,7 @@ describe("ImageGenerationNode Actual Cost (issue #41)", () => {
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
     await screen.findByRole("img", { name: /output/i });
-    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     await waitFor(() => {
       expect(screen.getByRole("img", { name: /output/i })).toHaveAttribute(
         "src",

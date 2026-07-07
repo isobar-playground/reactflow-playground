@@ -8,12 +8,17 @@ const approveModelAction = vi.fn();
 const unapproveModelAction = vi.fn();
 const fetchCatalogPricingAction = vi.fn();
 const fetchCatalogPricingChunkAction = vi.fn();
+const setEditPairAction = vi.fn();
+const clearEditPairAction = vi.fn();
 
 vi.mock("@/app/models-actions", () => ({
   approveModelAction: (endpointId: string) => approveModelAction(endpointId),
   unapproveModelAction: (endpointId: string) => unapproveModelAction(endpointId),
   fetchCatalogPricingAction: (endpointIds: string[]) => fetchCatalogPricingAction(endpointIds),
   fetchCatalogPricingChunkAction: (endpointIds: string[]) => fetchCatalogPricingChunkAction(endpointIds),
+  setEditPairAction: (baseEndpointId: string, editEndpointId: string) =>
+    setEditPairAction(baseEndpointId, editEndpointId),
+  clearEditPairAction: (baseEndpointId: string) => clearEditPairAction(baseEndpointId),
 }));
 
 beforeEach(() => {
@@ -21,6 +26,8 @@ beforeEach(() => {
   unapproveModelAction.mockReset();
   fetchCatalogPricingAction.mockReset().mockResolvedValue({});
   fetchCatalogPricingChunkAction.mockReset().mockResolvedValue({ prices: {} });
+  setEditPairAction.mockReset();
+  clearEditPairAction.mockReset();
 });
 
 function model(overrides: Partial<Model> = {}): Model {
@@ -131,6 +138,87 @@ describe("ModelsBrowser (approvals)", () => {
     const card = screen.getByRole("listitem");
     expect(within(card).getByText("Approved Model")).toBeInTheDocument();
     expect(within(card).getByRole("checkbox", { name: /approved/i })).toBeChecked();
+  });
+});
+
+describe("ModelsBrowser (Edit Model pairing, CONTEXT.md's Edit Model / ADR-0014)", () => {
+  const flux = model({ endpointId: "fal-ai/flux/dev", name: "FLUX.1 [dev]", category: "text-to-image" });
+  const nanoBanana = model({
+    endpointId: "fal-ai/nano-banana/edit",
+    name: "Nano Banana Edit",
+    category: "image-to-image",
+  });
+
+  it("offers no pairing selector for an unapproved text-to-image Model", () => {
+    render(<ModelsBrowser models={[flux, nanoBanana]} approvedIds={[]} />);
+
+    expect(screen.queryByRole("combobox", { name: /Edit Model/i })).not.toBeInTheDocument();
+  });
+
+  it("offers no pairing selector for an image-to-image Model — it edits with itself", () => {
+    render(
+      <ModelsBrowser models={[nanoBanana]} approvedIds={["fal-ai/nano-banana/edit"]} />,
+    );
+
+    expect(screen.queryByRole("combobox", { name: /Edit Model/i })).not.toBeInTheDocument();
+  });
+
+  it("offers approved image-to-image Models as Edit Model options for an approved text-to-image Model", () => {
+    render(
+      <ModelsBrowser
+        models={[flux, nanoBanana]}
+        approvedIds={["fal-ai/flux/dev", "fal-ai/nano-banana/edit"]}
+      />,
+    );
+
+    const select = screen.getByRole("combobox", { name: /Edit Model for FLUX/i });
+    expect(within(select).getByRole("option", { name: "Nano Banana Edit" })).toBeInTheDocument();
+  });
+
+  it("reflects an existing pairing as the selector's current value", () => {
+    render(
+      <ModelsBrowser
+        models={[flux, nanoBanana]}
+        approvedIds={["fal-ai/flux/dev", "fal-ai/nano-banana/edit"]}
+        editPairs={{ "fal-ai/flux/dev": "fal-ai/nano-banana/edit" }}
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: /Edit Model for FLUX/i })).toHaveValue(
+      "fal-ai/nano-banana/edit",
+    );
+  });
+
+  it("invokes setEditPairAction when pairing an approved text-to-image Model", async () => {
+    render(
+      <ModelsBrowser
+        models={[flux, nanoBanana]}
+        approvedIds={["fal-ai/flux/dev", "fal-ai/nano-banana/edit"]}
+      />,
+    );
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: /Edit Model for FLUX/i }),
+      "fal-ai/nano-banana/edit",
+    );
+
+    expect(setEditPairAction).toHaveBeenCalledWith("fal-ai/flux/dev", "fal-ai/nano-banana/edit");
+    expect(clearEditPairAction).not.toHaveBeenCalled();
+  });
+
+  it("invokes clearEditPairAction when clearing an existing pairing", async () => {
+    render(
+      <ModelsBrowser
+        models={[flux, nanoBanana]}
+        approvedIds={["fal-ai/flux/dev", "fal-ai/nano-banana/edit"]}
+        editPairs={{ "fal-ai/flux/dev": "fal-ai/nano-banana/edit" }}
+      />,
+    );
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: /Edit Model for FLUX/i }), "");
+
+    expect(clearEditPairAction).toHaveBeenCalledWith("fal-ai/flux/dev");
+    expect(setEditPairAction).not.toHaveBeenCalled();
   });
 });
 
