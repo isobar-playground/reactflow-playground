@@ -72,8 +72,9 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
   const history = data.history;
   const [isGenerating, setIsGenerating] = useState(false);
   // FAL failure (CONTEXT.md / ADR-0009, issue #39): any error from the real
-  // generation surfaces as a message in the node and adds no History entry.
-  // Transient UI state, like isGenerating (issue #16) — not persisted to data.
+  // generation is kept as runtime state for the Node Details Drawer and adds
+  // no History entry. Transient UI state, like isGenerating (issue #16) —
+  // not persisted to data.
   const [generationError, setGenerationError] = useState<string | null>(null);
   // Variant counter (CONTEXT.md / issue #12): above one, Generate clones this
   // node into that many independent nodes instead of appending to its own
@@ -542,11 +543,12 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
         <p className="mb-3 text-xs text-muted-foreground">Select a model to configure this node.</p>
       )}
 
-      {/* FAL failure (CONTEXT.md / ADR-0009, issue #39): shown instead of a
-          History entry — no entry is ever added for a failed generation. */}
+      {/* FAL failure (CONTEXT.md / ADR-0012): keep node-level visibility
+          compact; the raw error detail lives in the Node Details Drawer via
+          runtime state. No History entry is ever added for a failure. */}
       {generationError && (
         <p role="alert" className="mb-3 text-xs text-destructive">
-          {generationError}
+          Generation failed
         </p>
       )}
 

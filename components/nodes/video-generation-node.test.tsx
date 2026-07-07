@@ -281,7 +281,9 @@ describe("VideoGenerationNode inline details", () => {
     expect(within(node).getByRole("spinbutton", { name: /variant/i })).toBeInTheDocument();
     expect(within(node).getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
     expect(within(node).getByLabelText("Video generation preview")).toBeInTheDocument();
-    expect(within(node).getByRole("alert")).toHaveTextContent("FAL queue rejected");
+    const alert = within(node).getByRole("alert");
+    expect(alert).toHaveTextContent("Generation failed");
+    expect(alert).not.toHaveTextContent("FAL queue rejected");
   });
 });
 
@@ -1609,7 +1611,7 @@ describe("VideoGenerationNode real generation (issue #39)", () => {
     });
   });
 
-  it("shows an error message and adds no History entry when the FAL generation fails", async () => {
+  it("shows a compact failure affordance and adds no History entry when the FAL generation fails", async () => {
     vi.spyOn(realGeneration, "runVideoGeneration").mockRejectedValue(
       new Error("FAL queue submit returned 422 for fal-ai/kling-video/v3/pro/image-to-video"),
     );
@@ -1618,7 +1620,9 @@ describe("VideoGenerationNode real generation (issue #39)", () => {
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/422/);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Generation failed");
+    expect(alert).not.toHaveTextContent("FAL queue submit returned 422 for fal-ai/kling-video/v3/pro/image-to-video");
     expect(document.querySelector("video")).toBeNull();
     expect(screen.getByRole("button", { name: "Generate" })).toBeInTheDocument();
   });
@@ -1743,10 +1747,11 @@ describe("VideoGenerationNode real generation (issue #39)", () => {
       expect(document.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(3);
     });
 
-    // The failed clone shows its own error state (an alert inside that clone,
-    // not the original) and no output…
+    // The failed clone shows its own compact error state (an alert inside
+    // that clone, not the original) and no output…
     const failedAlert = await screen.findByRole("alert");
-    expect(failedAlert).toHaveTextContent(/422/);
+    expect(failedAlert).toHaveTextContent("Generation failed");
+    expect(failedAlert).not.toHaveTextContent("FAL queue status returned 422");
     const failedClone = failedAlert.closest(".react-flow__node") as HTMLElement;
     expect(within(failedClone).queryByLabelText("Generation video output")).not.toBeInTheDocument();
 
@@ -1879,7 +1884,9 @@ describe("VideoGenerationNode resumes a pending generation on mount (issue #39)"
       </ReactFlowProvider>,
     );
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/404/);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Generation failed");
+    expect(alert).not.toHaveTextContent("FAL queue status returned 404");
     expect(screen.queryByText(/generating/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate" })).toBeInTheDocument();
 
@@ -2091,7 +2098,9 @@ describe("VideoGenerationNode Pending Output flow (issue #65)", () => {
 
     await user.click(screen.getByRole("button", { name: "Regenerate" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/422/);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Generation failed");
+    expect(alert).not.toHaveTextContent("FAL queue submit returned 422");
     expect(screen.queryByText("Pending output")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Pending history entry")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Generation video output")).toHaveAttribute(
@@ -2172,7 +2181,9 @@ describe("VideoGenerationNode Pending Output flow (issue #65)", () => {
       rejectGeneration(new Error("FAL queue status returned 500"));
     });
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/500/);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Generation failed");
+    expect(alert).not.toHaveTextContent("FAL queue status returned 500");
     expect(screen.queryByText("Pending output")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Pending history entry")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Generation video output")).toHaveAttribute(

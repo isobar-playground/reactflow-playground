@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import * as libraryActions from "@/app/library-actions";
 import * as canvasActions from "@/app/canvas-actions";
@@ -717,17 +717,88 @@ describe("CanvasEditor Node Details Drawer", () => {
     );
 
     await screen.findByDisplayValue("local prompt");
-    fireEvent.click(container.querySelector('.react-flow__node[data-id="gen1"]') as HTMLElement);
+    const node = container.querySelector('.react-flow__node[data-id="gen1"]') as HTMLElement;
+    fireEvent.click(node);
 
     let drawer = await screen.findByRole("region", { name: "Node details drawer" });
     expect(within(drawer).getByText("No errors")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
-    await screen.findByRole("alert");
+    const nodeAlert = await within(node).findByRole("alert");
+    expect(nodeAlert).toHaveTextContent("Generation failed");
+    expect(nodeAlert).not.toHaveTextContent("FAL queue rejected");
 
     drawer = screen.getByRole("region", { name: "Node details drawer" });
     expect(within(drawer).getByText("Error")).toBeInTheDocument();
     expect(within(drawer).getByText("FAL queue rejected")).toBeInTheDocument();
+  });
+
+  it("keeps accepted-run failure details in the drawer without duplicating them on the node", async () => {
+    const pending = {
+      requestId: "req-pending",
+      statusUrl: "https://queue.fal.run/x/status",
+      responseUrl: "https://queue.fal.run/x",
+    };
+    let onPending: ((pendingGeneration: typeof pending) => void) | undefined;
+    let rejectGeneration!: (error: Error) => void;
+    vi.spyOn(realGeneration, "runImageGeneration").mockImplementation((_input, options) => {
+      onPending = options?.onPending;
+      return new Promise((_resolve, reject) => {
+        rejectGeneration = reject;
+      });
+    });
+    const user = userEvent.setup();
+    const { container } = render(
+      <CanvasEditor
+        canvas={makeCanvas({
+          nodes: [
+            {
+              id: "gen1",
+              type: "imageGeneration",
+              position: { x: 0, y: 0 },
+              data: {
+                prompt: "local prompt",
+                history: { entries: [], activeId: null },
+                model: {
+                  endpointId: "fal-ai/flux/dev",
+                  name: "FLUX.1 Dev",
+                  category: "text-to-image",
+                  handles: [],
+                  hasNegativePrompt: false,
+                },
+              },
+            },
+          ],
+          edges: [],
+        })}
+      />,
+    );
+
+    await screen.findByDisplayValue("local prompt");
+    const node = container.querySelector('.react-flow__node[data-id="gen1"]') as HTMLElement;
+    fireEvent.click(node);
+    let drawer = await screen.findByRole("region", { name: "Node details drawer" });
+    expect(within(drawer).getByText("No errors")).toBeInTheDocument();
+
+    await user.click(within(node).getByRole("button", { name: "Generate" }));
+    await act(async () => {
+      onPending?.(pending);
+    });
+    expect(await within(node).findByText("Pending output")).toBeInTheDocument();
+
+    await act(async () => {
+      rejectGeneration(new Error("FAL queue status returned 500"));
+    });
+
+    const nodeAlert = await within(node).findByRole("alert");
+    expect(nodeAlert).toHaveTextContent("Generation failed");
+    expect(nodeAlert).not.toHaveTextContent("FAL queue status returned 500");
+    expect(within(node).queryByText("Pending output")).not.toBeInTheDocument();
+
+    drawer = screen.getByRole("region", { name: "Node details drawer" });
+    expect(within(drawer).getByText("Error")).toBeInTheDocument();
+    expect(within(drawer).getByText("FAL queue status returned 500")).toBeInTheDocument();
+    expect(within(drawer).getByText("No History yet")).toBeInTheDocument();
   });
 });
 

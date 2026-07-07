@@ -1695,7 +1695,7 @@ describe("ImageGenerationNode real generation (issue #36)", () => {
     });
   });
 
-  it("shows an error message and adds no History entry when the FAL generation fails", async () => {
+  it("shows a compact failure affordance and adds no History entry when the FAL generation fails", async () => {
     vi.spyOn(realGeneration, "runImageGeneration").mockRejectedValue(
       new Error("FAL queue submit returned 422 for fal-ai/flux/dev"),
     );
@@ -1704,7 +1704,9 @@ describe("ImageGenerationNode real generation (issue #36)", () => {
 
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/422/);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Generation failed");
+    expect(alert).not.toHaveTextContent("FAL queue submit returned 422 for fal-ai/flux/dev");
     expect(screen.queryByRole("img", { name: /output/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate" })).toBeInTheDocument();
   });
@@ -1933,9 +1935,11 @@ describe("ImageGenerationNode: the original runs its own variant generation (iss
     await user.type(counter, "2");
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
-    // The original shows its own error state and no output…
+    // The original shows its own compact error state and no output…
     const original = document.querySelector('[data-node-id]') as HTMLElement;
-    expect(await within(original).findByRole("alert")).toHaveTextContent(/422/);
+    const originalAlert = await within(original).findByRole("alert");
+    expect(originalAlert).toHaveTextContent("Generation failed");
+    expect(originalAlert).not.toHaveTextContent("FAL queue submit returned 422 for fal-ai/flux/dev");
     expect(within(original).queryByRole("img", { name: "Generation output" })).not.toBeInTheDocument();
 
     // …while the clone still lands with its own fresh output.
@@ -2302,10 +2306,11 @@ describe("ImageGenerationNode: clones land immediately and their runs are resuma
       expect(document.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(3);
     });
 
-    // The failed clone shows its own error state (an alert inside that
-    // clone, not the original) and no output…
+    // The failed clone shows its own compact error state (an alert inside
+    // that clone, not the original) and no output…
     const failedAlert = await screen.findByRole("alert");
-    expect(failedAlert).toHaveTextContent(/422/);
+    expect(failedAlert).toHaveTextContent("Generation failed");
+    expect(failedAlert).not.toHaveTextContent("FAL queue status returned 422");
     const failedClone = failedAlert.closest(".react-flow__node") as HTMLElement;
     expect(within(failedClone).queryByRole("img", { name: "Generation output" })).not.toBeInTheDocument();
 
@@ -2492,7 +2497,9 @@ describe("ImageGenerationNode resumes a pending generation on mount (issue #38)"
       </ReactFlowProvider>,
     );
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/404/);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Generation failed");
+    expect(alert).not.toHaveTextContent("FAL queue status returned 404");
     expect(screen.queryByText(/generating/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate" })).toBeInTheDocument();
 
@@ -2692,7 +2699,9 @@ describe("ImageGenerationNode Pending Output flow (issue #62)", () => {
 
     await user.click(screen.getByRole("button", { name: "Regenerate" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/422/);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Generation failed");
+    expect(alert).not.toHaveTextContent("FAL queue submit returned 422");
     expect(screen.queryByText("Pending output")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Pending history entry")).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: /output/i })).toHaveAttribute(
@@ -2773,7 +2782,9 @@ describe("ImageGenerationNode Pending Output flow (issue #62)", () => {
       rejectGeneration(new Error("FAL queue status returned 500"));
     });
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/500/);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Generation failed");
+    expect(alert).not.toHaveTextContent("FAL queue status returned 500");
     expect(screen.queryByText("Pending output")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Pending history entry")).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: /output/i })).toHaveAttribute(
