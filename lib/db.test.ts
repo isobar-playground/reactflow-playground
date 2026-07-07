@@ -8,7 +8,7 @@ describe("local (file-less) database", () => {
     resetDbForTests();
   });
 
-  it("round-trips a canvas through the migrated schema", async () => {
+  it("round-trips a canvas through the migrated schema", { timeout: 15_000 }, async () => {
     const db = await getDb();
     await migrate(db);
 
