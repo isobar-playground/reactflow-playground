@@ -109,6 +109,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
 
   const activeEntry = getActiveEntry(history);
   const selectedModel = data.model;
+  const hasPendingOutput = Boolean(data.pendingGeneration);
   const activeCostLabel = activeEntry ? formatActualCost(activeEntry.actualCost) : null;
   const statusLabel = isGenerating
     ? "Generating"
@@ -469,8 +470,11 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         aria-label="Image generation preview"
         className="mb-3 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg border border-[var(--studio-border)] bg-muted"
       >
-        {isGenerating ? (
-          <span className="text-sm text-muted-foreground">Generating…</span>
+        {hasPendingOutput ? (
+          <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
+            <span className="size-8 animate-pulse rounded-full border border-primary/40 bg-primary/10" />
+            <span>Pending output</span>
+          </div>
         ) : activeEntry ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -508,12 +512,12 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         </div>
       </div>
 
-      {/* History carousel (CONTEXT.md): only appears from the second entry
-          onward, so the node stays simple until there's history. Each
-          thumbnail shows its own Actual Cost underneath (issue #41) — the
-          entry keeps its own recorded cost as the Active Output is flipped
-          through. */}
-      {history.entries.length >= 2 && (
+      {/* History carousel (CONTEXT.md): appears once there are multiple
+          completed entries, or when an accepted Pending Output sits beside
+          existing History. The pending placeholder is transient UI only,
+          never a draft History entry. Each completed thumbnail shows its
+          own Actual Cost underneath (issue #41). */}
+      {(history.entries.length >= 2 || (history.entries.length > 0 && hasPendingOutput)) && (
         <div className="nodrag mb-3 flex gap-1.5 overflow-x-auto">
           {history.entries.map((entry) => (
             <div key={entry.id} className="flex shrink-0 flex-col items-center gap-0.5">
@@ -538,6 +542,14 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
               )}
             </div>
           ))}
+          {hasPendingOutput && (
+            <div
+              aria-label="Pending history entry"
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-dashed border-primary/50 bg-primary/10"
+            >
+              <span className="size-4 animate-pulse rounded-full bg-primary/40" />
+            </div>
+          )}
         </div>
       )}
 

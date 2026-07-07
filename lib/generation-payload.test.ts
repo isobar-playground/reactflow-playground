@@ -83,6 +83,64 @@ describe("buildGenerationPayload", () => {
     expect(localAssetRefs).toEqual([]);
   });
 
+  it("keeps using an upstream Generation Node's Active Output while that source has a Pending Output", () => {
+    const connections: MediaHandleConnection[] = [
+      {
+        handle: imageUrlsHandle,
+        sources: [
+          {
+            type: "imageGeneration",
+            data: {
+              history: {
+                entries: [
+                  { id: "old", prompt: "old prompt", output: { kind: "image", url: "https://fal.media/old.png" } },
+                  { id: "active", prompt: "active prompt", output: { kind: "image", url: "https://fal.media/active.png" } },
+                ],
+                activeId: "active",
+              },
+              pendingGeneration: {
+                requestId: "req-pending",
+                statusUrl: "https://queue.fal.run/x/status",
+                responseUrl: "https://queue.fal.run/x",
+              },
+            },
+          },
+        ],
+      },
+    ];
+
+    const { body, localAssetRefs } = buildGenerationPayload({ prompt: "use the source" }, connections);
+
+    expect(body).toEqual({ prompt: "use the source", image_url: "https://fal.media/active.png" });
+    expect(localAssetRefs).toEqual([]);
+  });
+
+  it("lets selecting an older upstream History entry change what downstream generation consumes", () => {
+    const connections: MediaHandleConnection[] = [
+      {
+        handle: imageUrlsHandle,
+        sources: [
+          {
+            type: "imageGeneration",
+            data: {
+              history: {
+                entries: [
+                  { id: "old", prompt: "old prompt", output: { kind: "image", url: "https://fal.media/old.png" } },
+                  { id: "new", prompt: "new prompt", output: { kind: "image", url: "https://fal.media/new.png" } },
+                ],
+                activeId: "old",
+              },
+            },
+          },
+        ],
+      },
+    ];
+
+    const { body } = buildGenerationPayload({ prompt: "use the restored source" }, connections);
+
+    expect(body).toEqual({ prompt: "use the restored source", image_url: "https://fal.media/old.png" });
+  });
+
   it("sends a `many` handle's connections as an array, in edge order, marking only the local ones for inlining", () => {
     const manyHandle: ResolvedHandle = {
       handleId: "image_urls",
