@@ -826,11 +826,38 @@ describe("VideoGenerationNode Model picker (issue #31)", () => {
     const trigger = await screen.findByRole("button", { name: /video model picker/i });
     trigger.focus();
     await user.keyboard("[Enter]");
-    expect(screen.getByRole("listbox", { name: /video model options/i })).toBeInTheDocument();
+    const listbox = screen.getByRole("listbox", { name: /video model options/i });
+    expect(listbox).toBeInTheDocument();
+    await waitFor(() => expect(listbox).toHaveFocus());
     await user.keyboard("[Enter]");
 
     await waitFor(() => {
       expect(screen.getAllByText("Kling Video v3 Pro").length).toBeGreaterThan(0);
+      expect(trigger).toHaveFocus();
+    });
+  });
+
+  it("traps focus inside the advanced drawer and returns it to the trigger on Escape", async () => {
+    const user = userEvent.setup();
+    renderNode({
+      prompt: "local prompt",
+      history: { entries: [], activeId: null },
+      model: { ...testModel, hasNegativePrompt: true },
+    });
+
+    const trigger = screen.getByRole("button", { name: /open advanced settings/i });
+    await user.click(trigger);
+
+    const drawer = screen.getByRole("region", { name: "Advanced video generation settings" });
+    const negativePrompt = within(drawer).getByLabelText("Negative prompt");
+    await waitFor(() => expect(negativePrompt).toHaveFocus());
+
+    await user.tab();
+    expect(negativePrompt).toHaveFocus();
+
+    await user.keyboard("[Escape]");
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Advanced video generation settings" })).not.toBeInTheDocument();
       expect(trigger).toHaveFocus();
     });
   });

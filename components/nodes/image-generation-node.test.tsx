@@ -1075,10 +1075,36 @@ describe("ImageGenerationNode Model picker (issue #29)", () => {
     await user.keyboard("[Enter]");
     const listbox = screen.getByRole("listbox", { name: /image model options/i });
     expect(listbox).toBeInTheDocument();
+    await waitFor(() => expect(listbox).toHaveFocus());
     await user.keyboard("[ArrowDown][Enter]");
 
     await waitFor(() => {
       expect(screen.getAllByText("Edit Model").length).toBeGreaterThan(0);
+      expect(trigger).toHaveFocus();
+    });
+  });
+
+  it("traps focus inside the advanced drawer and returns it to the trigger on Escape", async () => {
+    const user = userEvent.setup();
+    renderNode({
+      prompt: "local prompt",
+      history: { entries: [], activeId: null },
+      model: { ...testModel, hasNegativePrompt: true },
+    });
+
+    const trigger = screen.getByRole("button", { name: /open advanced settings/i });
+    await user.click(trigger);
+
+    const drawer = screen.getByRole("region", { name: "Advanced image generation settings" });
+    const negativePrompt = within(drawer).getByLabelText("Negative prompt");
+    await waitFor(() => expect(negativePrompt).toHaveFocus());
+
+    await user.tab();
+    expect(negativePrompt).toHaveFocus();
+
+    await user.keyboard("[Escape]");
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Advanced image generation settings" })).not.toBeInTheDocument();
       expect(trigger).toHaveFocus();
     });
   });

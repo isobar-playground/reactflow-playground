@@ -12,6 +12,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import { HandleBadge } from "@/components/nodes/handle-badge";
+import { focusFirstDescendant, trapFocusWithin } from "@/components/nodes/focus-management";
 import { ModelPicker, type ApprovedPickerModel } from "@/components/nodes/model-picker";
 import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
 import { useNodeActions } from "@/components/nodes/use-node-actions";
@@ -84,6 +85,8 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
   const [variantCountInput, setVariantCountInput] = useState("1");
   const variantCount = Math.max(1, parseInt(variantCountInput, 10) || 1);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const advancedTriggerRef = useRef<HTMLButtonElement>(null);
+  const advancedPanelRef = useRef<HTMLElement>(null);
 
   const activeEntry = getActiveEntry(history);
   const selectedModel = data.model;
@@ -198,6 +201,18 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
 
   const { getNode, getEdges, setEdges, addNodes, addEdges, updateNodeData } = useReactFlow();
   const { duplicate, remove } = useNodeActions(id);
+
+  useEffect(() => {
+    if (!advancedOpen || !advancedPanelRef.current) return;
+    requestAnimationFrame(() => {
+      if (advancedPanelRef.current) focusFirstDescendant(advancedPanelRef.current);
+    });
+  }, [advancedOpen]);
+
+  function closeAdvancedSettings() {
+    setAdvancedOpen(false);
+    requestAnimationFrame(() => advancedTriggerRef.current?.focus());
+  }
 
   // React Flow only re-measures a node's Handle positions on resize/mount
   // (useUpdateNodeInternals' own documented caveat — see
@@ -415,6 +430,7 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
             {modeLabel}
           </span>
           <button
+            ref={advancedTriggerRef}
             type="button"
             aria-label={advancedOpen ? "Close advanced settings" : "Open advanced settings"}
             aria-expanded={advancedOpen}
@@ -561,8 +577,15 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
 
       {advancedOpen && (
         <section
+          ref={advancedPanelRef}
           role="region"
           aria-label="Advanced video generation settings"
+          tabIndex={-1}
+          onKeyDown={(event) => {
+            if (advancedPanelRef.current) {
+              trapFocusWithin(event, advancedPanelRef.current, closeAdvancedSettings);
+            }
+          }}
           className="nodrag mb-3 space-y-3 rounded-lg border border-[var(--studio-border)] bg-[var(--studio-panel)] p-3 text-xs"
         >
           {selectedModel?.hasNegativePrompt && (

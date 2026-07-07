@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { Check, ChevronsUpDown } from "lucide-react";
 import type { Model } from "@/lib/fal-models";
@@ -25,6 +25,7 @@ export function ModelPicker({ kind, models, selectedModel, onSelect }: ModelPick
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const listboxRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
   const availableModels = models ?? [];
   const selectedIndex = availableModels.findIndex((model) => model.endpointId === selectedModel?.endpointId);
@@ -34,6 +35,11 @@ export function ModelPicker({ kind, models, selectedModel, onSelect }: ModelPick
     setActiveIndex(selectedIndex >= 0 ? selectedIndex : 0);
     setOpen(true);
   }
+
+  useEffect(() => {
+    if (!open) return;
+    requestAnimationFrame(() => listboxRef.current?.focus());
+  }, [open]);
 
   if (models && models.length === 0) {
     return (
@@ -85,6 +91,11 @@ export function ModelPicker({ kind, models, selectedModel, onSelect }: ModelPick
     if (event.key === "Escape") {
       event.preventDefault();
       closeAndReturnFocus();
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      closeAndReturnFocus();
     }
   }
 
@@ -125,6 +136,7 @@ export function ModelPicker({ kind, models, selectedModel, onSelect }: ModelPick
 
       {open && (
         <div
+          ref={listboxRef}
           id={listboxId}
           role="listbox"
           aria-label={`${kind === "image" ? "Image" : "Video"} model options`}
@@ -143,6 +155,7 @@ export function ModelPicker({ kind, models, selectedModel, onSelect }: ModelPick
                 key={model.endpointId}
                 type="button"
                 role="option"
+                tabIndex={-1}
                 aria-selected={selected}
                 onMouseEnter={() => setActiveIndex(index)}
                 onClick={() => choose(model)}
