@@ -27,6 +27,19 @@ vi.mock("@/app/models-actions", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/real-generation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/real-generation")>();
+  return {
+    ...actual,
+    runVideoGeneration: vi.fn(),
+    resumeVideoGeneration: vi.fn(),
+  };
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
+
 const nodeTypes = {
   videoGeneration: VideoGenerationNode,
   staticTextReference: StaticTextReferenceNode,

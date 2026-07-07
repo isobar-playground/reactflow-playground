@@ -220,9 +220,11 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
   // flag would flip true the instant the success/failure handler nulls out
   // pendingGeneration, before the chain's own `finally` has run, silently
   // leaving isGenerating stuck true.
+  const ownPendingRequestIds = useRef<Set<string>>(new Set());
   const resumedRequestIds = useRef<Set<string>>(new Set());
   useEffect(() => {
     const pending = data.pendingGeneration;
+    if (pending && ownPendingRequestIds.current.has(pending.requestId)) return;
     if (!pending || resumedRequestIds.current.has(pending.requestId)) return;
     resumedRequestIds.current.add(pending.requestId);
     setIsGenerating(true);
@@ -338,7 +340,12 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
         selectedModel.hasNegativePrompt && data.negativePrompt ? data.negativePrompt : undefined;
       const result = await runVideoGeneration(
         { endpointId: selectedModel.endpointId, prompt: resolvedPromptText, negativePrompt, media: mediaConnections },
-        { onPending: (pending) => updateNodeData(id, { pendingGeneration: pending }) },
+        {
+          onPending: (pending) => {
+            ownPendingRequestIds.current.add(pending.requestId);
+            updateNodeData(id, { pendingGeneration: pending });
+          },
+        },
       );
       const { billableUnits, ...output } = result;
       const actualCost = computeActualCost({ pricing: selectedModel.pricing, billableUnits });

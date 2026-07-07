@@ -29,6 +29,20 @@ vi.mock("@/app/models-actions", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/real-generation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/real-generation")>();
+  return {
+    ...actual,
+    runImageGeneration: vi.fn(),
+    resumeImageGeneration: vi.fn(),
+    submitImageGeneration: vi.fn(),
+  };
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
+
 const nodeTypes = {
   imageGeneration: ImageGenerationNode,
   staticTextReference: StaticTextReferenceNode,
