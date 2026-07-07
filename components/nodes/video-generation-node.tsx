@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { Settings2 } from "lucide-react";
 import {
   Position,
   useNodeConnections,
@@ -83,9 +84,18 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
   // clamped to >= 1 when Generate reads it.
   const [variantCountInput, setVariantCountInput] = useState("1");
   const variantCount = Math.max(1, parseInt(variantCountInput, 10) || 1);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const activeEntry = getActiveEntry(history);
   const selectedModel = data.model;
+  const activeCostLabel = activeEntry ? formatActualCost(activeEntry.actualCost) : null;
+  const statusLabel = isGenerating
+    ? "Generating"
+    : generationError
+      ? "Error"
+      : data.pendingGeneration
+        ? "Pending"
+        : "Ready";
 
   // Estimated Price (CONTEXT.md / ADR-0009, issue #37): unit price × naively
   // estimated units × variant count, recomputed live as the variant counter
@@ -372,45 +382,78 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
   }
 
   return (
-    <div className={`${SURFACE_CLASSES.card} studio-node w-96 rounded-xl p-3`} data-node-id={id}>
+    <div className={`${SURFACE_CLASSES.card} studio-node w-[26rem] rounded-xl p-3`} data-node-id={id}>
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">Video Generation Node</span>
+        <div className="min-w-0">
+          <div className="truncate text-xs font-semibold text-[var(--studio-ink)]">Video Generation Node</div>
+          <div className="truncate text-[11px] text-muted-foreground">
+            {selectedModel?.name ?? "No model selected"}
+          </div>
+        </div>
         <div className="flex items-center gap-1.5">
           <span className={`${BADGE_CLASSES} border-[var(--data-video-border)] bg-[var(--data-video-bg)] text-[var(--data-video-fg)]`}>
             {modeLabel}
           </span>
+          <button
+            type="button"
+            aria-label={advancedOpen ? "Close advanced settings" : "Open advanced settings"}
+            aria-expanded={advancedOpen}
+            onClick={() => setAdvancedOpen((open) => !open)}
+            className="nodrag flex size-7 shrink-0 items-center justify-center rounded-md border border-[var(--studio-border)] bg-[var(--studio-input)] text-muted-foreground shadow-sm transition-colors hover:border-[var(--studio-border-strong)] hover:bg-[var(--studio-control-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)]"
+            title={advancedOpen ? "Close advanced settings" : "Open advanced settings"}
+          >
+            <Settings2 className="size-3.5" />
+          </button>
           <NodeActionsMenu onDuplicate={duplicate} onDelete={remove} />
         </div>
       </div>
 
-      {/* Output box: only takes up space once there's something to show —
-          a fresh node has no "no output yet" placeholder. */}
-      {(isGenerating || activeEntry) && (
-        <div className="mb-3 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg border border-[var(--studio-border)] bg-muted">
-          {isGenerating ? (
-            <span className="text-sm text-muted-foreground">Generating…</span>
-          ) : (
-            <video
-              src={activeEntry!.output.url}
-              className="h-full w-full object-cover"
-              autoPlay
-              loop
-              muted
-              playsInline
-            />
-          )}
-        </div>
-      )}
+      <div
+        aria-label="Video generation preview"
+        className="mb-3 flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg border border-[var(--studio-border)] bg-muted"
+      >
+        {isGenerating ? (
+          <span className="text-sm text-muted-foreground">Generating…</span>
+        ) : activeEntry ? (
+          <video
+            aria-label="Generation video output"
+            src={activeEntry.output.url}
+            className="h-full w-full object-cover"
+            autoPlay
+            loop
+            muted
+            playsInline
+            controls
+          />
+        ) : (
+          <span className="text-sm text-muted-foreground">No output yet</span>
+        )}
+      </div>
 
-      {/* Actual Cost (CONTEXT.md / ADR-0009, issue #41): shown with the
-          Active Output once its generation completed with both a
-          billable-units figure and a resolvable pricing snapshot. Mirrors
-          components/nodes/image-generation-node.tsx's identical display. */}
-      {activeEntry && formatActualCost(activeEntry.actualCost) && (
-        <div className="mb-3 text-xs text-muted-foreground">
-          {formatActualCost(activeEntry.actualCost)}
+      <div className="mb-3 grid grid-cols-2 gap-1.5 text-[11px] text-muted-foreground">
+        <div className="min-w-0 rounded-md border border-[var(--studio-border)] bg-muted px-2 py-1">
+          <div className="text-[10px] uppercase tracking-normal">Model</div>
+          <div className="truncate font-medium text-[var(--studio-ink)]">
+            {selectedModel?.name ?? "Select a model"}
+          </div>
         </div>
-      )}
+        <div className="min-w-0 rounded-md border border-[var(--studio-border)] bg-muted px-2 py-1">
+          <div className="text-[10px] uppercase tracking-normal">Status</div>
+          <div className="truncate font-medium text-[var(--studio-ink)]">{statusLabel}</div>
+        </div>
+        <div className="min-w-0 rounded-md border border-[var(--studio-border)] bg-muted px-2 py-1">
+          <div className="text-[10px] uppercase tracking-normal">Estimated Price</div>
+          <div className="truncate font-medium text-[var(--studio-ink)]">
+            {estimatedPriceLabel ?? "Unavailable"}
+          </div>
+        </div>
+        <div className="min-w-0 rounded-md border border-[var(--studio-border)] bg-muted px-2 py-1">
+          <div className="text-[10px] uppercase tracking-normal">Actual Cost</div>
+          <div className="truncate font-medium text-[var(--studio-ink)]">
+            {activeCostLabel ?? "Unavailable"}
+          </div>
+        </div>
+      </div>
 
       {/* History carousel (CONTEXT.md): only appears from the second entry
           onward, so the node stays simple until there's history. Each
@@ -446,22 +489,6 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
         placeholder="Enter a prompt…"
         data-node-id={id}
       />
-
-      {/* Negative-prompt config field (CONTEXT.md's Generation Node / ADR-0007,
-          issue #32): shown only when the selected Model's schema has a
-          `negative_prompt` field (data.model.hasNegativePrompt). It is a plain
-          config field written through to data.negativePrompt — not an Input
-          Handle, and never mixed into the Resolved Prompt below. */}
-      {selectedModel?.hasNegativePrompt && (
-        <textarea
-          aria-label="Negative prompt"
-          className={`${INPUT_CLASSES} nodrag mb-3 w-full resize-none p-2`}
-          rows={2}
-          value={data.negativePrompt ?? ""}
-          onChange={(event) => updateNodeData(id, { negativePrompt: event.target.value })}
-          placeholder="Negative prompt (optional)…"
-        />
-      )}
 
       {/* Resolved Prompt preview (CONTEXT.md): connected Static Text
           References (edge order) concatenated with the local prompt. */}
@@ -566,6 +593,84 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
         </p>
       )}
 
+      {advancedOpen && (
+        <section
+          role="region"
+          aria-label="Advanced video generation settings"
+          className="nodrag mb-3 space-y-3 rounded-lg border border-[var(--studio-border)] bg-[var(--studio-panel)] p-3 text-xs"
+        >
+          {selectedModel?.hasNegativePrompt && (
+            <label className="block">
+              <span className="mb-1 block font-medium text-[var(--studio-ink)]">Negative prompt</span>
+              <textarea
+                aria-label="Negative prompt"
+                className={`${INPUT_CLASSES} nodrag w-full resize-none p-2`}
+                rows={2}
+                value={data.negativePrompt ?? ""}
+                onChange={(event) => updateNodeData(id, { negativePrompt: event.target.value })}
+                placeholder="Negative prompt (optional)…"
+              />
+            </label>
+          )}
+
+          <div className="rounded-md border border-[var(--studio-border)] bg-muted p-2">
+            <div className="mb-1 font-medium text-[var(--studio-ink)]">Resolved Prompt</div>
+            <div className="break-words text-muted-foreground">
+              {resolvedPromptText || "No prompt text"}
+            </div>
+          </div>
+
+          <div className="rounded-md border border-[var(--studio-border)] bg-muted p-2">
+            <div className="mb-1 font-medium text-[var(--studio-ink)]">Model Details</div>
+            <dl className="space-y-1 text-muted-foreground">
+              <div className="flex justify-between gap-2">
+                <dt>Name</dt>
+                <dd className="min-w-0 truncate text-right text-[var(--studio-ink)]">
+                  {selectedModel?.name ?? "None"}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt>Endpoint</dt>
+                <dd className="min-w-0 truncate text-right text-[var(--studio-ink)]">
+                  {selectedModel?.endpointId ?? "None"}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt>Status</dt>
+                <dd className="text-[var(--studio-ink)]">{statusLabel}</dd>
+              </div>
+              {generationError && (
+                <div className="flex justify-between gap-2">
+                  <dt>Error</dt>
+                  <dd className="min-w-0 truncate text-right text-destructive">{generationError}</dd>
+                </div>
+              )}
+            </dl>
+          </div>
+
+          <div className="rounded-md border border-[var(--studio-border)] bg-muted p-2">
+            <div className="mb-2 font-medium text-[var(--studio-ink)]">Full History</div>
+            {history.entries.length > 0 ? (
+              <ol className="space-y-2">
+                {history.entries.map((entry, index) => (
+                  <li key={entry.id} className="rounded-md bg-[var(--studio-card)] p-2">
+                    <div className="mb-1 flex items-center justify-between gap-2 text-muted-foreground">
+                      <span>Entry {index + 1}</span>
+                      {formatActualCost(entry.actualCost) && (
+                        <span>{formatActualCost(entry.actualCost)}</span>
+                      )}
+                    </div>
+                    <div className="break-words text-[var(--studio-ink)]">{entry.prompt}</div>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <div className="text-muted-foreground">No History yet</div>
+            )}
+          </div>
+        </section>
+      )}
+
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -575,12 +680,6 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
         >
           {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
         </button>
-        {/* Estimated Price (CONTEXT.md / ADR-0009, issue #37): an estimate,
-            never a quote — labelled as such, shown only when the selected
-            Model has a resolvable pricing entry. */}
-        {estimatedPriceLabel && (
-          <span className="whitespace-nowrap text-xs text-muted-foreground">{estimatedPriceLabel}</span>
-        )}
       </div>
 
       {/* Input Handles (ADR-0007 / ADR-0008 / issue #31): none until a Model
