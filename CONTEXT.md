@@ -23,7 +23,7 @@ _Avoid_: Static Image Reference, Static Video Reference
 A Reference that holds user-entered text, which other nodes can consume (e.g. as part of a prompt).
 
 **Generation Node**:
-A node that selects a Model, takes one or more inputs (References or other Generation Nodes), holds a prompt, and produces an output asset by running its selected Model on FAL when "Generate" is triggered — without a Model selected there is nothing to run, so Generate is unavailable. Comes in two kinds: an Image Generation Node and a Video Generation Node. Until a Model is selected it has no input handles; the selected Model's input schema defines them (see Model and Connection rules). If the selected Model's schema has a `negative_prompt`, the node also shows an optional negative-prompt field beneath the prompt — an editable **config field**, not an Input Handle, and not part of the Resolved Prompt. Other scalar parameters (guidance, steps, seed, …) are not surfaced.
+A node that selects a Model, takes one or more inputs (References or other Generation Nodes), holds a prompt, and produces an output asset by running its selected Model on FAL when "Generate" is triggered — without a Model selected there is nothing to run, so Generate is unavailable. Comes in two kinds: an Image Generation Node and a Video Generation Node. Until a Model is selected it has no input handles; the selected Model's input schema defines them (see Model and Connection rules). If the selected Model's schema has a `negative_prompt`, the Node Details Drawer shows it as an optional **config field**, not an Input Handle, and not part of the Resolved Prompt. Other scalar parameters (guidance, steps, seed, …) are not surfaced.
 _Avoid_: Generator, asset node
 
 **Image Generation Node**:
@@ -36,11 +36,22 @@ A Generation Node whose output is a video.
 The final prompt a Generation Node uses: the text of all connected Static Text References (in edge order) concatenated with the node's own local prompt field.
 
 **History**:
-The ordered list of outputs a single Generation Node has produced over time, shown as a carousel inside the node. There is no carousel until a second output exists. One entry is the Active Output. Each entry records the Actual Cost of the generation that produced it.
+The ordered list of completed outputs a single Generation Node has produced over time, shown as a carousel inside the node once there is more than one completed output or a Pending Output alongside an existing output. One entry is the Active Output. Each entry records the local prompt and Actual Cost of the generation that produced it.
 _Avoid_: Variants, gallery
 
 **Active Output**:
-The currently-selected History entry of a Generation Node. It is what the node displays, and what downstream nodes consume when this node is used as a reference.
+The currently-selected History entry of a Generation Node. It is what downstream nodes consume when this node is used as a reference; the node's own Output Preview may temporarily hide it while a Pending Output is being generated.
+
+**Output Preview**:
+The visual area of a Generation Node that shows either a completed output or a pending-generation state. During regeneration it may show only the Pending Output's activity state, while the Active Output remains unchanged for downstream consumers. The same concept applies to Image Generation Nodes and Video Generation Nodes.
+
+**Pending Output**:
+A generation run that has been accepted but has not produced its output yet, shown as an activity state in the Output Preview and, when there is existing History, as a placeholder next to it. It starts after the run is accepted, not merely after the user requests generation; it becomes a History entry only after it completes successfully, and disappears if the run fails. During regeneration, the current Active Output remains unchanged for downstream consumers.
+_Avoid_: Variant, draft History entry
+
+**Node Details Drawer**:
+A canvas-level panel outside the node that shows detailed information about the selected Generation Node, such as status, Resolved Prompt, Model details, errors, and full History. It does not replace the node's working controls for choosing a Model, entering prompts, setting variant count, generating, and previewing outputs.
+_Avoid_: Advanced settings, inline drawer, node-level drawer
 
 **Variant / Clone**:
 When a Generation Node's variant count is set above one and generation is triggered, the count is the total number of variants — the node itself is one of them, so (count - 1) new sibling nodes are cloned beside it. Every variant runs its own generation: the original generates exactly as a normal Generate would (its new output appends to its existing History and becomes the Active Output), and each clone starts with its own single fresh output. Each clone inherits the incoming reference edges of the original.
@@ -67,7 +78,7 @@ The approximate amount a Generation Node shows before generating: the selected M
 _Avoid_: Cost (that's the actual one), quote
 
 **Actual Cost**:
-What one generation really cost, as billed by FAL: the billable units FAL reports for the finished run × the Model's unit price. Recorded on the History entry it produced and shown with the output; a canvas also shows the running sum of all its nodes' Actual Costs.
+What one generation really cost, as billed by FAL: the billable units FAL reports for the finished run × the Model's unit price. It belongs to the completed output that generation produced, not to the Generation Node as a whole; a canvas also shows the running sum of all its nodes' Actual Costs.
 _Avoid_: Price (that's the estimate), spend
 
 **Model Catalog**:
