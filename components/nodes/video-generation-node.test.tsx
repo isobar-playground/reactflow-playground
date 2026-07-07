@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   ReactFlow,
@@ -1909,6 +1909,330 @@ describe("VideoGenerationNode resumes a pending generation on mount (issue #39)"
     renderNode({ prompt: "a car", history: { entries: [], activeId: null }, model: testModel });
 
     expect(resume).not.toHaveBeenCalled();
+  });
+});
+
+describe("VideoGenerationNode Pending Output flow (issue #65)", () => {
+  const pending = {
+    requestId: "req-pending",
+    statusUrl: "https://queue.fal.run/x/status",
+    responseUrl: "https://queue.fal.run/x",
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the first-generation Pending Output only after FAL accepts the run", async () => {
+    let onPending: ((pendingGeneration: typeof pending) => void) | undefined;
+    vi.spyOn(realGeneration, "runVideoGeneration").mockImplementation((_input, options) => {
+      onPending = options?.onPending;
+      return new Promise(() => {});
+    });
+    const user = userEvent.setup();
+    renderNode({ prompt: "a car", history: { entries: [], activeId: null }, model: testModel });
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    const preview = screen.getByLabelText("Video generation preview");
+    expect(within(preview).getByText("No output yet")).toBeInTheDocument();
+    expect(within(preview).queryByText("Pending output")).not.toBeInTheDocument();
+
+    await act(async () => {
+      onPending?.(pending);
+    });
+
+    await waitFor(() => {
+      expect(within(preview).getByText("Pending output")).toBeInTheDocument();
+    });
+  });
+
+  it("shows a regeneration pending preview and carousel placeholder after FAL accepts the run", async () => {
+    let onPending: ((pendingGeneration: typeof pending) => void) | undefined;
+    let resolveGeneration!: (result: { kind: "video"; url: string }) => void;
+    vi.spyOn(realGeneration, "runVideoGeneration").mockImplementation((_input, options) => {
+      onPending = options?.onPending;
+      return new Promise((resolve) => {
+        resolveGeneration = resolve;
+      });
+    });
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: {
+            prompt: "a car",
+            history: {
+              entries: [
+                {
+                  id: "old",
+                  prompt: "a car",
+                  output: { kind: "video", url: "https://fal.media/old.mp4" },
+                },
+              ],
+              activeId: "old",
+            },
+            model: testModel,
+          },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    const preview = screen.getByLabelText("Video generation preview");
+    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+
+    expect(within(preview).getByLabelText("Generation video output")).toHaveAttribute(
+      "src",
+      "https://fal.media/old.mp4",
+    );
+    expect(screen.queryByLabelText("Pending history entry")).not.toBeInTheDocument();
+
+    await act(async () => {
+      onPending?.(pending);
+    });
+
+    await waitFor(() => {
+      expect(within(preview).getByText("Pending output")).toBeInTheDocument();
+    });
+    expect(within(preview).queryByLabelText("Generation video output")).not.toBeInTheDocument();
+
+    const historyButtons = screen.getAllByRole("button").filter((button) =>
+      button.querySelector("video"),
+    );
+    expect(historyButtons).toHaveLength(1);
+    expect(historyButtons[0].querySelector("video")).toHaveAttribute(
+      "src",
+      "https://fal.media/old.mp4",
+    );
+    expect(screen.getByLabelText("Pending history entry")).toBeInTheDocument();
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.history.entries).toHaveLength(1);
+      expect(data.history.activeId).toBe("old");
+      expect(data.pendingGeneration).toEqual(pending);
+    });
+
+    resolveGeneration({ kind: "video", url: "https://fal.media/new.mp4" });
+
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.history.entries).toHaveLength(2);
+      expect(data.history.activeId).toBe(data.history.entries[1].id);
+      expect(data.pendingGeneration).toBeNull();
+    });
+    expect(within(preview).getByLabelText("Generation video output")).toHaveAttribute(
+      "src",
+      "https://fal.media/new.mp4",
+    );
+    expect(screen.queryByLabelText("Pending history entry")).not.toBeInTheDocument();
+  });
+
+  it("does not create Pending Output UI or mutate History when submit fails before FAL acceptance", async () => {
+    vi.spyOn(realGeneration, "runVideoGeneration").mockRejectedValue(
+      new Error("FAL queue submit returned 422"),
+    );
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: {
+            prompt: "a car",
+            history: {
+              entries: [
+                {
+                  id: "old",
+                  prompt: "a car",
+                  output: { kind: "video", url: "https://fal.media/old.mp4" },
+                },
+              ],
+              activeId: "old",
+            },
+            model: testModel,
+          },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/422/);
+    expect(screen.queryByText("Pending output")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Pending history entry")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Generation video output")).toHaveAttribute(
+      "src",
+      "https://fal.media/old.mp4",
+    );
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.history.entries).toHaveLength(1);
+      expect(data.history.activeId).toBe("old");
+      expect(data.pendingGeneration).toBeNull();
+    });
+  });
+
+  it("removes Pending Output UI and preserves the previous Active Output when an accepted run fails", async () => {
+    let onPending: ((pendingGeneration: typeof pending) => void) | undefined;
+    let rejectGeneration!: (error: Error) => void;
+    vi.spyOn(realGeneration, "runVideoGeneration").mockImplementation((_input, options) => {
+      onPending = options?.onPending;
+      return new Promise((_resolve, reject) => {
+        rejectGeneration = reject;
+      });
+    });
+    const user = userEvent.setup();
+    let getNodeRef: ((id: string) => Node | undefined) | undefined;
+
+    function TestCanvas() {
+      const [nodes, , onNodesChange] = useNodesState<Node>([
+        {
+          id: "n1",
+          type: "videoGeneration",
+          position: { x: 0, y: 0 },
+          initialWidth: 400,
+          initialHeight: 500,
+          data: {
+            prompt: "a car",
+            history: {
+              entries: [
+                {
+                  id: "old",
+                  prompt: "a car",
+                  output: { kind: "video", url: "https://fal.media/old.mp4" },
+                },
+              ],
+              activeId: "old",
+            },
+            model: testModel,
+          },
+        },
+      ]);
+      const [edges, , onEdgesChange] = useEdgesState<Edge>([]);
+      const { getNode } = useReactFlow();
+      getNodeRef = getNode as (id: string) => Node | undefined;
+      return (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+        />
+      );
+    }
+    render(
+      <ReactFlowProvider>
+        <TestCanvas />
+      </ReactFlowProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await act(async () => {
+      onPending?.(pending);
+    });
+
+    expect(await screen.findByLabelText("Pending history entry")).toBeInTheDocument();
+
+    await act(async () => {
+      rejectGeneration(new Error("FAL queue status returned 500"));
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/500/);
+    expect(screen.queryByText("Pending output")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Pending history entry")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Generation video output")).toHaveAttribute(
+      "src",
+      "https://fal.media/old.mp4",
+    );
+    await waitFor(() => {
+      const data = getNodeRef?.("n1")?.data as VideoGenerationNodeData;
+      expect(data.history.entries).toHaveLength(1);
+      expect(data.history.activeId).toBe("old");
+      expect(data.pendingGeneration).toBeNull();
+    });
+  });
+
+  it("restores the pending preview and carousel placeholder from a persisted pending record on reload", async () => {
+    vi.spyOn(realGeneration, "resumeVideoGeneration").mockReturnValue(new Promise(() => {}));
+
+    renderNode({
+      prompt: "a car",
+      history: {
+        entries: [
+          {
+            id: "old",
+            prompt: "a car",
+            output: { kind: "video", url: "https://fal.media/old.mp4" },
+          },
+        ],
+        activeId: "old",
+      },
+      model: testModel,
+      pendingGeneration: pending,
+    });
+
+    expect(realGeneration.resumeVideoGeneration).toHaveBeenCalledWith(pending);
+    const preview = screen.getByLabelText("Video generation preview");
+    expect(within(preview).getByText("Pending output")).toBeInTheDocument();
+    expect(within(preview).queryByLabelText("Generation video output")).not.toBeInTheDocument();
+
+    const historyButtons = screen.getAllByRole("button").filter((button) =>
+      button.querySelector("video"),
+    );
+    expect(historyButtons).toHaveLength(1);
+    expect(historyButtons[0].querySelector("video")).toHaveAttribute(
+      "src",
+      "https://fal.media/old.mp4",
+    );
+    expect(screen.getByLabelText("Pending history entry")).toBeInTheDocument();
   });
 });
 

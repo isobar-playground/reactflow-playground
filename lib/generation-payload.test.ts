@@ -16,6 +16,13 @@ const imageUrlsHandle: ResolvedHandle = {
   many: false,
 };
 
+const videoUrlHandle: ResolvedHandle = {
+  handleId: "video_url",
+  label: "video_url",
+  dataType: "video",
+  many: false,
+};
+
 describe("buildGenerationPayload", () => {
   it("always includes the prompt, with no media handles wired", () => {
     const { body } = buildGenerationPayload({ prompt: "a red car" }, []);
@@ -112,6 +119,38 @@ describe("buildGenerationPayload", () => {
     const { body, localAssetRefs } = buildGenerationPayload({ prompt: "use the source" }, connections);
 
     expect(body).toEqual({ prompt: "use the source", image_url: "https://fal.media/active.png" });
+    expect(localAssetRefs).toEqual([]);
+  });
+
+  it("keeps using an upstream Video Generation Node's Active Output while that source has a Pending Output", () => {
+    const connections: MediaHandleConnection[] = [
+      {
+        handle: videoUrlHandle,
+        sources: [
+          {
+            type: "videoGeneration",
+            data: {
+              history: {
+                entries: [
+                  { id: "old", prompt: "old prompt", output: { kind: "video", url: "https://fal.media/old.mp4" } },
+                  { id: "active", prompt: "active prompt", output: { kind: "video", url: "https://fal.media/active.mp4" } },
+                ],
+                activeId: "active",
+              },
+              pendingGeneration: {
+                requestId: "req-pending",
+                statusUrl: "https://queue.fal.run/x/status",
+                responseUrl: "https://queue.fal.run/x",
+              },
+            },
+          },
+        ],
+      },
+    ];
+
+    const { body, localAssetRefs } = buildGenerationPayload({ prompt: "use the source" }, connections);
+
+    expect(body).toEqual({ prompt: "use the source", video_url: "https://fal.media/active.mp4" });
     expect(localAssetRefs).toEqual([]);
   });
 
