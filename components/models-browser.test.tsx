@@ -66,6 +66,23 @@ describe("ModelsBrowser (read-only catalog)", () => {
 
     expect(screen.getByText(/no models/i)).toBeInTheDocument();
   });
+
+  it("shows total, visible, and approved Model counts", () => {
+    render(
+      <ModelsBrowser
+        models={[
+          model({ endpointId: "fal-ai/flux/dev", name: "FLUX.1 [dev]" }),
+          model({ endpointId: "fal-ai/kling/video", name: "Kling Video" }),
+          model({ endpointId: "fal-ai/veo/video", name: "Veo Video" }),
+        ]}
+        approvedIds={["fal-ai/flux/dev", "fal-ai/veo/video"]}
+      />,
+    );
+
+    expect(screen.getByText("3 total")).toBeInTheDocument();
+    expect(screen.getByText("3 visible")).toBeInTheDocument();
+    expect(screen.getByText("2 approved")).toBeInTheDocument();
+  });
 });
 
 describe("ModelsBrowser (approvals)", () => {
@@ -102,6 +119,19 @@ describe("ModelsBrowser (approvals)", () => {
     expect(unapproveModelAction).toHaveBeenCalledWith("fal-ai/flux/dev");
     expect(approveModelAction).not.toHaveBeenCalled();
   });
+
+  it("makes approval state prominent on each Model row", () => {
+    render(
+      <ModelsBrowser
+        models={[model({ endpointId: "fal-ai/flux/dev", name: "FLUX.1 [dev]" })]}
+        approvedIds={["fal-ai/flux/dev"]}
+      />,
+    );
+
+    const card = screen.getByRole("listitem");
+    expect(within(card).getByText("Approved Model")).toBeInTheDocument();
+    expect(within(card).getByRole("checkbox", { name: /approved/i })).toBeChecked();
+  });
 });
 
 describe("ModelsBrowser (search and filters)", () => {
@@ -130,6 +160,7 @@ describe("ModelsBrowser (search and filters)", () => {
 
     expect(screen.queryByText("FLUX.1 [dev]")).not.toBeInTheDocument();
     expect(screen.getByText("Kling Video")).toBeInTheDocument();
+    expect(screen.getByText("1 visible")).toBeInTheDocument();
   });
 
   it("narrows the list when a category filter is chosen", async () => {
@@ -177,6 +208,19 @@ describe("ModelsBrowser (search and filters)", () => {
     expect(screen.queryByText("FLUX.1 [dev]")).not.toBeInTheDocument();
     expect(screen.queryByText("Kling Video")).not.toBeInTheDocument();
     expect(screen.getByText(/no models match/i)).toBeInTheDocument();
+  });
+
+  it("shows a clear empty state when the approved filter has no results", async () => {
+    render(<ModelsBrowser models={[flux, kling]} approvedIds={[]} />);
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: /approval/i }),
+      "approved",
+    );
+
+    expect(screen.queryByText("FLUX.1 [dev]")).not.toBeInTheDocument();
+    expect(screen.queryByText("Kling Video")).not.toBeInTheDocument();
+    expect(screen.getByText(/no approved models yet/i)).toBeInTheDocument();
   });
 
   it("lists only derived families with >= 2 Models in the dropdown", () => {
