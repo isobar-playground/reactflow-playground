@@ -16,7 +16,7 @@ import { focusFirstDescendant, trapFocusWithin } from "@/components/nodes/focus-
 import { ModelPicker, type ApprovedPickerModel } from "@/components/nodes/model-picker";
 import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
 import { useNodeActions } from "@/components/nodes/use-node-actions";
-import { runVideoGeneration, resumeVideoGeneration } from "@/lib/real-generation";
+import { runVideoGeneration, resumeVideoGeneration, submitVideoGeneration } from "@/lib/real-generation";
 import type { PendingGeneration } from "@/lib/fal-generation";
 import {
   appendEntry,
@@ -273,90 +273,19 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.pendingGeneration]);
 
-  // Variant cloning (CONTEXT.md / issue #12): when the counter is above one,
-  // Generate adds (count - 1) sibling clones beside this node instead of
-  // appending to its own History — the counter is the total number of
-  // variants, and this node is already one of them. Each clone inherits only
-  // the original's incoming edges (lib/variant-clone.ts), is laid out with an
-  // offset, and generates its own single fresh output — never a copy of this
-  // node's History. The counter resets to 1 afterward. Mirrors
-  // components/nodes/image-generation-node.tsx's handleGenerateVariants.
-  //
-  // ADR-0002: getNode(id) already returns the live `data.prompt` — the
-  // prompt field writes through on every keystroke — so no manual merge of
-  // the local prompt into the cloned node's data is needed here.
-  // Each clone runs its own independent real FAL submission (CONTEXT.md /
-  // ADR-0009's Variant / Clone) — never a shared or copied result. A clone
-  // whose generation errors gets no History entry (CONTEXT.md), same as the
-  // single-generation path below, but doesn't block its siblings. Mirrors
-  // components/nodes/image-generation-node.tsx's handleGenerateVariants.
-  async function handleGenerateVariants(count: number) {
-    if (!selectedModel) return;
-    setIsGenerating(true);
-    const node = getNode(id);
-    if (!node) {
-      setIsGenerating(false);
-      return;
-    }
-    const { nodes: clones, edges: clonedEdges } = cloneVariants(node, getEdges(), count - 1);
-
-    const negativePrompt =
-      selectedModel.hasNegativePrompt && data.negativePrompt ? data.negativePrompt : undefined;
-    // Each clone inherits the original's incoming reference edges verbatim
-    // (lib/variant-clone.ts), so its wired media inputs are the same
-    // `mediaConnections` this node itself just computed (issue #40).
-    const generated = await Promise.all(
-      clones.map(() =>
-        runVideoGeneration({
-          endpointId: selectedModel.endpointId,
-          prompt: resolvedPromptText,
-          negativePrompt,
-          media: mediaConnections,
-        }).catch(() => null),
-      ),
-    );
-    const clonesWithOutput = clones.map((clone, index) => {
-      const result = generated[index];
-      if (!result) {
-        return { ...clone, data: { ...clone.data, history: clone.data.history } };
-      }
-      const { billableUnits, ...output } = result;
-      const actualCost = computeActualCost({ pricing: selectedModel.pricing, billableUnits });
-      return {
-        ...clone,
-        data: {
-          ...clone.data,
-          history: appendEntry(clone.data.history as NodeHistory, {
-            id: crypto.randomUUID(),
-            prompt,
-            output,
-            actualCost,
-          }),
-        },
-      };
-    });
-
-    addNodes(clonesWithOutput);
-    addEdges(clonedEdges);
-    setVariantCountInput("1");
-    setIsGenerating(false);
-  }
-
-  // Every Generate/Regenerate submits a real request to the selected Model's
-  // FAL queue endpoint (CONTEXT.md / ADR-0009), sending the Resolved Prompt
-  // as `prompt` and the negative-prompt config field when the Model supports
-  // it. The returned pending record is written through to
-  // data.pendingGeneration as soon as FAL accepts the submission (enables
-  // resuming polling after a reload — see the mount effect above) and
-  // cleared once the run settles. On success, a new History entry becomes
-  // the Active Output (ADR-0002 / issue #16); on any FAL failure, an error
-  // message is shown instead and no History entry is added. Mirrors
-  // components/nodes/image-generation-node.tsx's handleGenerate.
-  async function handleGenerate() {
-    if (variantCount > 1) {
-      await handleGenerateVariants(variantCount);
-      return;
-    }
+  // The node's own generation — the normal single-Generate path (CONTEXT.md /
+  // ADR-0009): submit a real request to the selected Model's FAL queue
+  // endpoint, sending the Resolved Prompt as `prompt` and the negative-prompt
+  // config field when the Model supports it. The returned pending record is
+  // written through to data.pendingGeneration as soon as FAL accepts the
+  // submission (ADR-0009: enables resuming polling after a reload, the mount
+  // effect above) and cleared once the run settles. On success, a new History
+  // entry becomes the Active Output (ADR-0002 / issue #16); on any FAL
+  // failure, an error message is shown instead and no History entry is added.
+  // Never throws — a failure settles into the node's own error state, so a
+  // variant batch awaiting this run isn't torn down by it (ADR-0011). Mirrors
+  // components/nodes/image-generation-node.tsx's runOwnGeneration.
+  async function runOwnGeneration() {
     if (!selectedModel) return;
     setIsGenerating(true);
     setGenerationError(null);
@@ -384,6 +313,81 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
     } finally {
       setIsGenerating(false);
     }
+  }
+
+  // Variant cloning (CONTEXT.md / ADR-0011, issues #12, #47, #48 and #49): the
+  // counter is the *total* number of variants and this node is one of them,
+  // so every variant runs its own generation — this node through the normal
+  // single-Generate path above (History append, pendingGeneration
+  // write-through, its own error state), plus (count - 1) sibling clones
+  // added beside it. Each clone inherits only the original's incoming edges
+  // (lib/variant-clone.ts), is laid out with an offset, and generates its own
+  // single fresh output — never a copy of this node's History. The counter
+  // resets to 1 at trigger time.
+  //
+  // A variant run is owned by the variant node, not by this submitter
+  // (ADR-0011): the clones land on the canvas immediately — before any run
+  // finishes — and this handler only *submits* their runs
+  // (lib/real-generation.ts's submit-only submitVideoGeneration), writing
+  // each clone's pending record into that clone's node data as its
+  // submission is accepted. The clone's own resume-on-mount machinery (the
+  // effect above, issue #39) picks the record up, polls the run to
+  // completion, and appends the single fresh output as the clone's only
+  // History entry — this submitter never polls a clone's run, so nothing
+  // here can double-append. A clone's failed run surfaces as that clone's
+  // own error state with no History entry, and no variant's failure blocks
+  // its siblings. Mirrors components/nodes/image-generation-node.tsx's
+  // handleGenerateVariants.
+  //
+  // ADR-0002: getNode(id) already returns the live `data.prompt` — the
+  // prompt field writes through on every keystroke — so no manual merge of
+  // the local prompt into the cloned node's data is needed here.
+  async function handleGenerateVariants(count: number) {
+    if (!selectedModel) return;
+    const node = getNode(id);
+    if (!node) return;
+    const { nodes: clones, edges: clonedEdges } = cloneVariants(node, getEdges(), count - 1);
+    setVariantCountInput("1");
+
+    // Clones appear at trigger time, each starting with no run of its own
+    // yet — never with this node's pendingGeneration, which belongs to the
+    // original's run alone.
+    addNodes(clones.map((clone) => ({ ...clone, data: { ...clone.data, pendingGeneration: null } })));
+    addEdges(clonedEdges);
+
+    // The original's run fires first, through the normal single-Generate
+    // path — never awaited before the clones' submissions, so no variant's
+    // run blocks another's.
+    const ownRun = runOwnGeneration();
+
+    const negativePrompt =
+      selectedModel.hasNegativePrompt && data.negativePrompt ? data.negativePrompt : undefined;
+    // Each clone inherits the original's incoming reference edges verbatim
+    // (lib/variant-clone.ts), so its wired media inputs are the same
+    // `mediaConnections` this node itself just computed (issue #40). A
+    // submission FAL rejects leaves that clone without a run — its siblings'
+    // submissions proceed regardless.
+    await Promise.all(
+      clones.map((clone) =>
+        submitVideoGeneration({
+          endpointId: selectedModel.endpointId,
+          prompt: resolvedPromptText,
+          negativePrompt,
+          media: mediaConnections,
+        })
+          .then((pending) => updateNodeData(clone.id, { pendingGeneration: pending }))
+          .catch(() => null),
+      ),
+    );
+    await ownRun;
+  }
+
+  async function handleGenerate() {
+    if (variantCount > 1) {
+      await handleGenerateVariants(variantCount);
+      return;
+    }
+    await runOwnGeneration();
   }
 
   // Selecting a History thumbnail sets the Active Output and restores that

@@ -125,6 +125,19 @@ export async function resumeImageGeneration(
   return pollUntilSettled(pending, options, "image");
 }
 
+// The submit-only operation for video variants (issue #49 / ADR-0011):
+// mirrors submitImageGeneration exactly — submits to the FAL queue like a
+// full run would, then resolves to the pending-generation record without
+// ever polling. A video variant submitter uses this for its clones, writing
+// the record into each clone's node data and handing the run to that clone's
+// own resume-on-mount machinery (issue #39). The submitter never polls a
+// clone's run — double-append is the failure mode ADR-0011 exists to prevent.
+export async function submitVideoGeneration(
+  input: RunVideoGenerationInput,
+): Promise<PendingGeneration> {
+  return submit(input);
+}
+
 // Video Generation Node's real generation (issue #39): identical submit/poll
 // mechanics to the image path above — only the resulting placeholder's
 // `kind` differs, and FAL's video Models answer with a `video`/`videos`

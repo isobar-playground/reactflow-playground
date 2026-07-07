@@ -33,6 +33,7 @@ vi.mock("@/lib/real-generation", async (importOriginal) => {
     ...actual,
     runVideoGeneration: vi.fn(),
     resumeVideoGeneration: vi.fn(),
+    submitVideoGeneration: vi.fn(),
   };
 });
 
@@ -390,9 +391,27 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
   });
 
   it("clones (count - 1) siblings beside the node when the counter is above one and Generate is clicked", async () => {
+    // The original runs its own generation (issue #47); each clone's run is
+    // only *submitted* by the original (issue #48/#49 / ADR-0011) and polled
+    // to completion by the clone's own resume machinery.
     const generate = vi
       .spyOn(realGeneration, "runVideoGeneration")
-      .mockResolvedValue({ kind: "video", url: "/sample-video.mp4" });
+      .mockResolvedValueOnce({ kind: "video", url: "https://fal.media/c1.mp4" });
+    let submissions = 0;
+    const submit = vi
+      .spyOn(realGeneration, "submitVideoGeneration")
+      .mockImplementation(async () => {
+        submissions += 1;
+        return {
+          requestId: `req-${submissions}`,
+          statusUrl: `https://queue.fal.run/x/status/${submissions}`,
+          responseUrl: `https://queue.fal.run/x/${submissions}`,
+        };
+      });
+    vi.spyOn(realGeneration, "resumeVideoGeneration").mockImplementation(async (pending) => ({
+      kind: "video",
+      url: `https://fal.media/c${pending.requestId === "req-1" ? 2 : 3}.mp4`,
+    }));
     const user = userEvent.setup();
     const { container } = renderInCanvas([
       {
@@ -411,17 +430,28 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
     // A counter of 3 means 3 variants *total* — this node counts as one of
-    // them, so only 2 new siblings are cloned beside it.
+    // them (and runs its own generation, issue #47), so only 2 new siblings
+    // are cloned beside it, and 3 generations run in all: the original's own
+    // full run plus one submit-only run per clone.
     await waitFor(() => {
-      expect(generate).toHaveBeenCalledTimes(2);
+      expect(generate).toHaveBeenCalledTimes(1);
+      expect(submit).toHaveBeenCalledTimes(2);
     });
 
     await waitFor(() => {
       expect(container.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(3);
     });
+    // Each variant lands its own output: the original's own run plus each
+    // clone's resumed run — three main-preview videos in all.
     await waitFor(() => {
-      expect(container.querySelectorAll("video")).toHaveLength(2);
+      expect(screen.getAllByLabelText("Generation video output")).toHaveLength(3);
     });
+    const outputs = screen.getAllByLabelText("Generation video output");
+    expect(outputs.map((v) => v.getAttribute("src")).sort()).toEqual([
+      "https://fal.media/c1.mp4",
+      "https://fal.media/c2.mp4",
+      "https://fal.media/c3.mp4",
+    ]);
   });
 
   it("resets the variant counter to 1 after cloning", async () => {
@@ -429,6 +459,7 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
       kind: "video",
       url: "/sample-video.mp4",
     });
+    vi.spyOn(realGeneration, "submitVideoGeneration").mockReturnValue(new Promise(() => {}));
     const user = userEvent.setup();
     renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
@@ -1691,11 +1722,27 @@ describe("VideoGenerationNode real generation (issue #39)", () => {
     expect(run).toHaveBeenCalledTimes(2);
   });
 
-  it("runs one independent real generation per clone when generating variants", async () => {
+  it("runs one independent real generation per variant: the original's own run plus a submit-only run per clone", async () => {
+    // Every variant runs its own generation (issue #47/#49). The original
+    // goes through the full run path (runVideoGeneration); each clone's run
+    // is only *submitted* here (submitVideoGeneration, issue #48/#49 /
+    // ADR-0011) and polled to completion by the clone's own resume machinery.
     const run = vi
       .spyOn(realGeneration, "runVideoGeneration")
-      .mockResolvedValueOnce({ kind: "video", url: "https://fal.media/c1.mp4" })
-      .mockResolvedValueOnce({ kind: "video", url: "https://fal.media/c2.mp4" });
+      .mockResolvedValueOnce({ kind: "video", url: "https://fal.media/c1.mp4" });
+    let submissions = 0;
+    const submit = vi.spyOn(realGeneration, "submitVideoGeneration").mockImplementation(async () => {
+      submissions += 1;
+      return {
+        requestId: `req-${submissions}`,
+        statusUrl: `https://queue.fal.run/x/status/${submissions}`,
+        responseUrl: `https://queue.fal.run/x/${submissions}`,
+      };
+    });
+    vi.spyOn(realGeneration, "resumeVideoGeneration").mockResolvedValue({
+      kind: "video",
+      url: "https://fal.media/clone.mp4",
+    });
     const user = userEvent.setup();
     renderInCanvas([
       {
@@ -1714,22 +1761,44 @@ describe("VideoGenerationNode real generation (issue #39)", () => {
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
     await waitFor(() => {
-      expect(run).toHaveBeenCalledTimes(2);
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(submit).toHaveBeenCalledTimes(2);
     });
     expect(run).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ endpointId: "fal-ai/kling-video/v3/pro/image-to-video", prompt: "a car" }),
+      expect.anything(),
     );
-    expect(run).toHaveBeenNthCalledWith(
+    expect(submit).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ endpointId: "fal-ai/kling-video/v3/pro/image-to-video", prompt: "a car" }),
+    );
+    expect(submit).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ endpointId: "fal-ai/kling-video/v3/pro/image-to-video", prompt: "a car" }),
     );
   });
 
-  it("adds no History entry for a clone whose generation fails, while its sibling still gets one", async () => {
-    vi.spyOn(realGeneration, "runVideoGeneration")
-      .mockResolvedValueOnce({ kind: "video", url: "https://fal.media/c1.mp4" })
-      .mockRejectedValueOnce(new Error("FAL error"));
+  it("surfaces a clone's failed run as that clone's own error state with no History entry, without blocking its siblings", async () => {
+    vi.spyOn(realGeneration, "runVideoGeneration").mockResolvedValue({
+      kind: "video",
+      url: "https://fal.media/original.mp4",
+    });
+    let submissions = 0;
+    vi.spyOn(realGeneration, "submitVideoGeneration").mockImplementation(async () => {
+      submissions += 1;
+      return {
+        requestId: `req-clone-${submissions}`,
+        statusUrl: `https://queue.fal.run/x/status/${submissions}`,
+        responseUrl: `https://queue.fal.run/x/${submissions}`,
+      };
+    });
+    vi.spyOn(realGeneration, "resumeVideoGeneration").mockImplementation(async (pending) => {
+      if (pending.requestId === "req-clone-1") {
+        throw new Error("FAL queue status returned 422");
+      }
+      return { kind: "video", url: "https://fal.media/sibling.mp4" };
+    });
     const user = userEvent.setup();
     renderInCanvas([
       {
@@ -1750,10 +1819,22 @@ describe("VideoGenerationNode real generation (issue #39)", () => {
     await waitFor(() => {
       expect(document.querySelectorAll(".react-flow__node[data-id]")).toHaveLength(3);
     });
-    // Only one clone got a real output; the other's failed generation added
-    // no History entry, so it shows no video output at all.
+
+    // The failed clone shows its own error state (an alert inside that clone,
+    // not the original) and no output…
+    const failedAlert = await screen.findByRole("alert");
+    expect(failedAlert).toHaveTextContent(/422/);
+    const failedClone = failedAlert.closest(".react-flow__node") as HTMLElement;
+    expect(within(failedClone).queryByLabelText("Generation video output")).not.toBeInTheDocument();
+
+    // …while its siblings — the original and the other clone — still land
+    // their own outputs. Two main-preview videos in all.
     await waitFor(() => {
-      expect(document.querySelectorAll("video")).toHaveLength(1);
+      const outputs = screen.getAllByLabelText("Generation video output");
+      expect(outputs.map((v) => v.getAttribute("src")).sort()).toEqual([
+        "https://fal.media/original.mp4",
+        "https://fal.media/sibling.mp4",
+      ]);
     });
   });
 });
