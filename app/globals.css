@@ -7,9 +7,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-heading: var(--font-geist-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,24 +49,50 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --studio-app: #eef1ee;
+  --studio-page: #f8faf7;
+  --studio-canvas: #eef3f0;
+  --studio-grid: #c9d4d0;
+  --studio-panel: #fbfcf8;
+  --studio-card: #ffffff;
+  --studio-popover: #ffffff;
+  --studio-input: #fffefa;
+  --studio-control-hover: #edf3ef;
+  --studio-control-active: #dfe9e4;
+  --studio-ink: #1d2526;
+  --studio-muted: #657272;
+  --studio-border: #cfd8d3;
+  --studio-border-strong: #94a59f;
+  --studio-focus-ring: color-mix(in srgb, #2368ff 35%, transparent);
+  --studio-shadow: 0 1px 2px rgb(29 37 38 / 7%), 0 12px 28px rgb(29 37 38 / 8%);
+  --studio-popover-shadow: 0 18px 44px rgb(29 37 38 / 16%);
+  --data-text-fg: #5b3f00;
+  --data-text-bg: #fff4c8;
+  --data-text-border: #d5aa2b;
+  --data-image-fg: #0f5d7a;
+  --data-image-bg: #e0f6ff;
+  --data-image-border: #51a9c8;
+  --data-video-fg: #6b2d6c;
+  --data-video-bg: #f5e5ff;
+  --data-video-border: #b478c2;
+  --background: var(--studio-app);
+  --foreground: var(--studio-ink);
+  --card: var(--studio-card);
+  --card-foreground: var(--studio-ink);
+  --popover: var(--studio-popover);
+  --popover-foreground: var(--studio-ink);
+  --primary: #1d2526;
+  --primary-foreground: #fbfcf8;
+  --secondary: #e5ece8;
+  --secondary-foreground: var(--studio-ink);
+  --muted: #edf3ef;
+  --muted-foreground: var(--studio-muted);
+  --accent: #dbe7e1;
+  --accent-foreground: var(--studio-ink);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: var(--studio-border);
+  --input: var(--studio-border);
+  --ring: #2368ff;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -123,8 +149,84 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   }
   html {
     @apply font-sans;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--ring) 18%, transparent);
+  }
+}
+
+@layer components {
+  .studio-shell {
+    background:
+      radial-gradient(circle at top left, rgb(255 255 255 / 70%), transparent 34rem),
+      linear-gradient(180deg, var(--studio-page), var(--studio-app));
+  }
+
+  .studio-grid {
+    background-color: var(--studio-canvas);
+  }
+
+  .studio-grid .react-flow__pane {
+    cursor: default;
+  }
+
+  .studio-grid .react-flow__background pattern circle,
+  .studio-grid .react-flow__background pattern line {
+    color: var(--studio-grid);
+  }
+
+  .studio-grid .react-flow__controls {
+    overflow: hidden;
+    border: 1px solid var(--studio-border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--studio-shadow);
+  }
+
+  .studio-grid .react-flow__controls-button {
+    border-color: var(--studio-border);
+    background: var(--studio-popover);
+    color: var(--studio-ink);
+  }
+
+  .studio-grid .react-flow__edge-path {
+    stroke: color-mix(in srgb, var(--studio-muted) 76%, white);
+    stroke-width: 2;
+  }
+
+  .studio-node {
+    box-shadow: var(--studio-shadow);
+  }
+
+  .studio-input {
+    border-color: var(--studio-border);
+    background: var(--studio-input);
+  }
+
+  .studio-input:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--studio-focus-ring);
+  }
+
+  .studio-lift {
+    transition: transform 150ms ease, border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+  }
+
+  .studio-lift:hover {
+    transform: translateY(-1px);
+    border-color: var(--studio-border-strong);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .studio-lift {
+      transition: none;
+    }
+
+    .studio-lift:hover {
+      transform: none;
+    }
   }
 }

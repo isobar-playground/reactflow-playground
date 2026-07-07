@@ -4,6 +4,7 @@ import { Position, useReactFlow, type NodeProps, type Node } from "@xyflow/react
 import { HandleBadge } from "@/components/nodes/handle-badge";
 import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
 import { useNodeActions } from "@/components/nodes/use-node-actions";
+import { INPUT_CLASSES, SURFACE_CLASSES } from "@/lib/visual-system";
 
 export type StaticTextReferenceNodeData = {
   text: string;
@@ -24,13 +25,13 @@ export function StaticTextReferenceNode({ id, data }: NodeProps<StaticTextRefere
   const { duplicate, remove } = useNodeActions(id);
 
   return (
-    <div className="w-64 rounded-lg border border-border bg-card p-3 shadow-sm">
+    <div className={`${SURFACE_CLASSES.card} studio-node w-64 rounded-lg p-3`}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">Static Text Reference</span>
         <NodeActionsMenu onDuplicate={duplicate} onDelete={remove} />
       </div>
       <textarea
-        className="nodrag w-full resize-none rounded-md border border-border bg-background p-2 text-sm outline-none"
+        className={`${INPUT_CLASSES} nodrag w-full resize-none p-2`}
         rows={4}
         value={data.text}
         onChange={(event) => updateNodeData(id, { text: event.target.value })}

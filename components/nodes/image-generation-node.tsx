@@ -34,6 +34,7 @@ import { estimatePrice, formatEstimatedPrice } from "@/lib/price-estimate";
 import { computeActualCost, formatActualCost } from "@/lib/actual-cost";
 import { reconcileEdges, resolveEdgeDataTypeFromNodes } from "@/lib/edge-reconcile";
 import type { StaticTextReferenceNodeData } from "@/components/nodes/static-text-reference-node";
+import { BADGE_CLASSES, INPUT_CLASSES, SURFACE_CLASSES } from "@/lib/visual-system";
 
 // The Model recorded on a Generation Node once selected (CONTEXT.md's Model /
 // ADR-0007): enough to show the picker's current value, drive the node's
@@ -382,11 +383,11 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
   }
 
   return (
-    <div className="w-96 rounded-xl border border-border bg-card p-3 shadow-sm" data-node-id={id}>
+    <div className={`${SURFACE_CLASSES.card} studio-node w-96 rounded-xl p-3`} data-node-id={id}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">Image Generation Node</span>
         <div className="flex items-center gap-1.5">
-          <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+          <span className={`${BADGE_CLASSES} border-[var(--data-image-border)] bg-[var(--data-image-bg)] text-[var(--data-image-fg)]`}>
             {modeLabel}
           </span>
           <NodeActionsMenu onDuplicate={duplicate} onDelete={remove} />
@@ -396,7 +397,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
       {/* Output box: only takes up space once there's something to show —
           a fresh node has no "no output yet" placeholder. */}
       {(isGenerating || activeEntry) && (
-        <div className="mb-3 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg bg-muted">
+        <div className="mb-3 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg border border-[var(--studio-border)] bg-muted">
           {isGenerating ? (
             <span className="text-sm text-muted-foreground">Generating…</span>
           ) : (
@@ -433,8 +434,8 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
               <button
                 type="button"
                 onClick={() => handleSelectHistoryEntry(entry.id)}
-                className={`h-12 w-12 shrink-0 overflow-hidden rounded-md border ${
-                  entry.id === history.activeId ? "border-primary" : "border-border"
+                className={`h-12 w-12 shrink-0 overflow-hidden rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)] ${
+                  entry.id === history.activeId ? "border-primary ring-2 ring-[var(--studio-focus-ring)]" : "border-border"
                 }`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -455,7 +456,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
       )}
 
       <textarea
-        className="nodrag mb-3 w-full resize-none rounded-md border border-border bg-background p-2 text-sm outline-none"
+        className={`${INPUT_CLASSES} nodrag mb-3 w-full resize-none p-2`}
         rows={3}
         value={prompt}
         onChange={(event) => updateNodeData(id, { prompt: event.target.value })}
@@ -471,7 +472,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
       {selectedModel?.hasNegativePrompt && (
         <textarea
           aria-label="Negative prompt"
-          className="nodrag mb-3 w-full resize-none rounded-md border border-border bg-background p-2 text-sm outline-none"
+          className={`${INPUT_CLASSES} nodrag mb-3 w-full resize-none p-2`}
           rows={2}
           value={data.negativePrompt ?? ""}
           onChange={(event) => updateNodeData(id, { negativePrompt: event.target.value })}
@@ -482,7 +483,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
       {/* Resolved Prompt preview (CONTEXT.md): connected Static Text
           References (edge order) concatenated with the local prompt. */}
       {resolvedPromptText.length > 0 && (
-        <div className="mb-3 rounded-md border border-border bg-muted p-2 text-xs text-muted-foreground">
+        <div className="mb-3 rounded-md border border-[var(--studio-border)] bg-muted p-2 text-xs text-muted-foreground">
           <div className="mb-1 font-medium">Resolved Prompt</div>
           <div>{resolvedPromptText}</div>
         </div>
@@ -500,7 +501,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
           value={variantCountInput}
           onChange={(event) => setVariantCountInput(event.target.value)}
           onBlur={() => setVariantCountInput(String(variantCount))}
-          className="nodrag w-16 rounded-md border border-border bg-background p-1 text-sm outline-none"
+          className={`${INPUT_CLASSES} nodrag w-16 p-1`}
         />
 
         {/* Model picker (CONTEXT.md's Model / issue #29): lists Approved
@@ -518,7 +519,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
         {approvedModels && approvedModels.length > 0 && (
           <select
             aria-label="Model"
-            className="nodrag flex-1 rounded-md border border-border bg-background p-1 text-sm outline-none"
+            className={`${INPUT_CLASSES} nodrag flex-1 p-1`}
             value={selectedModel?.endpointId ?? ""}
             onChange={(event) => {
               const chosen = approvedModels.find((m) => m.endpointId === event.target.value);
@@ -587,7 +588,7 @@ export function ImageGenerationNode({ id, data }: NodeProps<ImageGenerationNodeT
           type="button"
           onClick={handleGenerate}
           disabled={isGenerating || !selectedModel}
-          className="nodrag flex-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          className="nodrag flex-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/85 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)] disabled:pointer-events-none disabled:opacity-45"
         >
           {isGenerating ? "Generating…" : history.entries.length > 0 ? "Regenerate" : "Generate"}
         </button>

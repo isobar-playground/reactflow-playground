@@ -19,6 +19,7 @@ import {
 } from "@/lib/model-filter";
 import { familyOptions } from "@/lib/model-family";
 import { formatUnitPrice, type ModelPricing } from "@/lib/fal-pricing";
+import { BADGE_CLASSES, INPUT_CLASSES, SURFACE_CLASSES } from "@/lib/visual-system";
 
 // Lazy Unit Price fetch cap (ADR-0010 revision): FAL's pricing endpoint caps
 // ~30-50 repeated `endpoint_id` params per call (lib/fal-pricing.ts's
@@ -157,7 +158,7 @@ export function ModelsBrowser({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div className={`${SURFACE_CLASSES.panel} flex flex-col gap-3 rounded-lg p-3 sm:flex-row sm:items-center`}>
         <input
           type="search"
           role="searchbox"
@@ -165,7 +166,7 @@ export function ModelsBrowser({
           placeholder="Search by name, description, tag, or provider…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm sm:max-w-xs"
+          className={`${INPUT_CLASSES} w-full sm:max-w-xs`}
         />
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Category</span>
@@ -175,7 +176,7 @@ export function ModelsBrowser({
             onChange={(event) =>
               setCategory(event.target.value as ModelCategory | "all")
             }
-            className="rounded-md border border-border bg-background px-2 py-2 text-sm"
+            className={`${INPUT_CLASSES} py-2`}
           >
             <option value="all">All categories</option>
             {SURFACED_CATEGORIES.map((c) => (
@@ -191,7 +192,7 @@ export function ModelsBrowser({
             aria-label="Filter by family"
             value={family}
             onChange={(event) => setFamily(event.target.value)}
-            className="rounded-md border border-border bg-background px-2 py-2 text-sm"
+            className={`${INPUT_CLASSES} py-2`}
           >
             <option value="all">All families</option>
             {families.map((f) => (
@@ -209,7 +210,7 @@ export function ModelsBrowser({
             onChange={(event) =>
               setApproval(event.target.value as ApprovalFilter)
             }
-            className="rounded-md border border-border bg-background px-2 py-2 text-sm"
+            className={`${INPUT_CLASSES} py-2`}
           >
             <option value="all">All</option>
             <option value="approved">Approved</option>
@@ -222,7 +223,7 @@ export function ModelsBrowser({
             aria-label="Sort models"
             value={sort}
             onChange={(event) => setSort(event.target.value as SortOrder)}
-            className="rounded-md border border-border bg-background px-2 py-2 text-sm"
+            className={`${INPUT_CLASSES} py-2`}
           >
             <option value="newest">Newest</option>
             <option value="oldest">Oldest</option>
@@ -244,7 +245,7 @@ export function ModelsBrowser({
                 type="button"
                 onClick={handleLoadPricesAnyway}
                 disabled={manualLoad !== null}
-                className="underline disabled:no-underline"
+                className="rounded-md px-1 underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)] disabled:no-underline"
               >
                 {manualLoad
                   ? `Loading prices… (${manualLoad.done}/${manualLoad.total})`
@@ -299,7 +300,7 @@ function ModelCard({
   }
 
   return (
-    <li className="flex flex-col gap-2 rounded-lg border border-border p-3">
+    <li className={`${SURFACE_CLASSES.card} studio-lift flex flex-col gap-2 rounded-lg p-3`}>
       {model.thumbnailUrl ? (
         <div className="aspect-video overflow-hidden rounded-md border border-border bg-muted">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -312,7 +313,7 @@ function ModelCard({
       ) : null}
       <div className="flex flex-col gap-1">
         <span className="text-sm font-medium">{model.name}</span>
-        <span className="w-fit rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+        <span className={`${BADGE_CLASSES} w-fit border-[var(--studio-border)] bg-muted text-muted-foreground`}>
           {model.category}
         </span>
         {unitPrice ? (
@@ -328,6 +329,7 @@ function ModelCard({
           checked={checked}
           disabled={isPending}
           onChange={(event) => handleToggle(event.target.checked)}
+          className="size-4 rounded border-[var(--studio-border)] accent-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)]"
         />
         Approved
       </label>

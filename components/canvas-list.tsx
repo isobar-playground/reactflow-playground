@@ -13,11 +13,12 @@ import {
 } from "@/components/ui/dialog";
 import { renameCanvasAction, deleteCanvasAction } from "@/app/canvas-actions";
 import type { Canvas } from "@/lib/canvas-repo";
+import { INPUT_CLASSES, SURFACE_CLASSES } from "@/lib/visual-system";
 
 export function CanvasList({ canvases }: { canvases: Canvas[] }) {
   if (canvases.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
+      <p className={`${SURFACE_CLASSES.panel} rounded-lg p-4 text-sm text-muted-foreground`}>
         No canvases yet. Create one to get started.
       </p>
     );
@@ -59,11 +60,11 @@ function CanvasRow({ canvas }: { canvas: Canvas }) {
   }
 
   return (
-    <li className="flex items-center justify-between gap-2 rounded-lg border border-border p-3">
+    <li className={`${SURFACE_CLASSES.card} studio-lift flex items-center justify-between gap-2 rounded-lg p-3`}>
       {renaming ? (
         <input
           autoFocus
-          className="flex-1 rounded-md border border-border bg-background px-2 py-1 text-sm"
+          className={`${INPUT_CLASSES} flex-1 py-1`}
           value={name}
           onChange={(e) => setName(e.target.value)}
           onBlur={submitRename}
@@ -76,7 +77,7 @@ function CanvasRow({ canvas }: { canvas: Canvas }) {
           }}
         />
       ) : (
-        <Link href={`/canvas/${canvas.id}`} className="flex-1 text-sm font-medium hover:underline">
+        <Link href={`/canvas/${canvas.id}`} className="flex-1 rounded-md px-1 py-1 text-sm font-medium hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)]">
           {canvas.name}
         </Link>
       )}

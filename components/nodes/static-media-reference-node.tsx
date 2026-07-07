@@ -21,6 +21,7 @@ import { NodeActionsMenu } from "@/components/nodes/node-actions-menu";
 import { useNodeActions } from "@/components/nodes/use-node-actions";
 import { listAssetsAction, uploadAssetAction } from "@/app/library-actions";
 import type { Asset } from "@/lib/asset-library";
+import { DATA_TYPE_TREATMENTS, INPUT_CLASSES, SURFACE_CLASSES } from "@/lib/visual-system";
 
 export type StaticMediaReferenceNodeData = {
   asset: Asset | null;
@@ -103,23 +104,26 @@ export function StaticMediaReferenceNode({ id, data }: NodeProps<StaticMediaRefe
   }, [data.forcedOpenTypeHint, id, updateNodeData]);
 
   return (
-    <div className="w-64 rounded-lg border border-border bg-card p-3 shadow-sm" data-node-id={id}>
+    <div className={`${SURFACE_CLASSES.card} studio-node w-64 rounded-lg p-3`} data-node-id={id}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">Static Media Reference</span>
         <NodeActionsMenu onDuplicate={duplicate} onDelete={remove} />
       </div>
 
       {asset ? (
-        <div className="mb-2 overflow-hidden rounded-md bg-muted">
+        <div className="relative mb-2 overflow-hidden rounded-md bg-muted">
           {asset.type === "video" ? (
             <video src={asset.url} className="aspect-square w-full object-cover" controls />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={asset.url} alt={asset.name} className="aspect-square w-full object-cover" />
           )}
+          <span className={`pointer-events-none absolute left-2 top-2 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${DATA_TYPE_TREATMENTS[asset.type].classes}`}>
+            {DATA_TYPE_TREATMENTS[asset.type].label}
+          </span>
         </div>
       ) : (
-        <div className="mb-2 flex aspect-square w-full items-center justify-center rounded-md bg-muted text-sm text-muted-foreground">
+        <div className="mb-2 flex aspect-square w-full items-center justify-center rounded-md border border-dashed border-[var(--studio-border)] bg-muted text-sm text-muted-foreground">
           No asset chosen
         </div>
       )}
@@ -209,7 +213,7 @@ function AssetPickerDialog({
               type="button"
               aria-label={asset.name}
               onClick={() => onSelect(asset)}
-              className="aspect-square overflow-hidden rounded-md border border-border bg-muted"
+            className="aspect-square overflow-hidden rounded-md border border-[var(--studio-border)] bg-muted transition-colors hover:border-[var(--studio-border-strong)] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)]"
             >
               {asset.type === "video" ? (
                 <video src={asset.url} className="h-full w-full object-cover" />
@@ -230,7 +234,7 @@ function AssetPickerDialog({
             type="file"
             accept={typeHint ? `${typeHint}/*` : "image/*,video/*"}
             disabled={isUploading}
-            className="mt-1 block w-full text-sm"
+            className={`${INPUT_CLASSES} mt-1 block w-full`}
             onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) void handleUpload(file);

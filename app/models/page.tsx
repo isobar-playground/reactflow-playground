@@ -2,6 +2,7 @@ import Link from "next/link";
 import { listModels } from "@/lib/fal-models";
 import { listApprovedEndpointIds } from "@/lib/model-approvals";
 import { ModelsBrowser } from "@/components/models-browser";
+import { SURFACE_CLASSES } from "@/lib/visual-system";
 
 // The Model Catalog is read live from FAL (ADR-0006), never snapshotted —
 // so never prerender/cache this statically.
@@ -24,12 +25,13 @@ export default async function ModelsPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 p-6">
+    <main className={`studio-shell min-h-screen w-full ${SURFACE_CLASSES.app}`}>
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 sm:p-8">
       <div>
-        <Link href="/" className="text-sm text-muted-foreground hover:underline">
+        <Link href="/" className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-[var(--studio-control-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)]">
           &larr; All canvases
         </Link>
-        <h1 className="text-xl font-semibold">Models</h1>
+        <h1 className="mt-2 text-2xl font-semibold tracking-normal">Models</h1>
       </div>
 
       {failed ? (
@@ -39,6 +41,7 @@ export default async function ModelsPage() {
       ) : (
         <ModelsBrowser models={models ?? []} approvedIds={approvedIds} />
       )}
+      </div>
     </main>
   );
 }

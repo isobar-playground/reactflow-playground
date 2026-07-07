@@ -47,6 +47,7 @@ import { formatActualCost } from "@/lib/actual-cost";
 import type { Canvas } from "@/lib/canvas-repo";
 import type { ImageGenerationNodeData } from "@/components/nodes/image-generation-node";
 import type { VideoGenerationNodeData } from "@/components/nodes/video-generation-node";
+import { INPUT_CLASSES, SURFACE_CLASSES } from "@/lib/visual-system";
 
 const AUTOSAVE_DELAY_MS = 1500;
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
@@ -501,16 +502,16 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
   }
 
   return (
-    <div className="flex h-screen w-full flex-col">
-      <header className="flex items-center gap-3 border-b border-border px-4 py-2">
-        <Link href="/" className="text-sm text-muted-foreground hover:underline">
+    <div className={`flex h-screen w-full flex-col ${SURFACE_CLASSES.app}`}>
+      <header className={`${SURFACE_CLASSES.panel} z-10 flex items-center gap-3 rounded-none border-x-0 border-t-0 px-4 py-2`}>
+        <Link href="/" className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-[var(--studio-control-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)]">
           &larr; All canvases
         </Link>
         {renaming ? (
           <input
             autoFocus
             aria-label="Canvas name"
-            className="rounded-md border border-border bg-background px-2 py-1 text-sm font-medium"
+            className={`${INPUT_CLASSES} px-2 py-1 text-sm font-medium`}
             value={nameDraft}
             onChange={(e) => setNameDraft(e.target.value)}
             onBlur={submitRename}
@@ -525,7 +526,7 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
         ) : (
           <button
             type="button"
-            className="rounded-md px-2 py-1 text-sm font-medium hover:bg-muted"
+            className="rounded-md px-2 py-1 text-sm font-medium hover:bg-[var(--studio-control-hover)] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)]"
             onClick={() => {
               setNameDraft(canvasName);
               setRenaming(true);
@@ -538,7 +539,7 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
           {totalCost !== undefined && (
             <span
               aria-label="Total cost"
-              className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+              className="rounded-full border border-[var(--studio-border)] bg-muted px-2 py-0.5 text-xs text-muted-foreground"
             >
               Total cost: {formatActualCost(totalCost)}
             </span>
@@ -582,8 +583,9 @@ export function CanvasEditor({ canvas }: { canvas: Canvas }) {
                 viewportRef.current = viewport;
                 persist(currentGraph());
               }}
+              className="studio-grid"
             >
-              <Background />
+              <Background color="var(--studio-grid)" gap={18} size={1.3} />
               <Controls />
             </ReactFlow>
           </ContextMenuTrigger>
@@ -636,7 +638,7 @@ function SpawnPickerMenu({
           leaving no node behind (nothing was created yet at this point). */}
       <div className="fixed inset-0 z-10" onClick={onDismiss} />
       <div
-        className="pointer-events-auto absolute z-20 w-56 -translate-x-1/2 rounded-lg bg-popover p-1 text-sm text-popover-foreground shadow-lg ring-1 ring-foreground/10"
+        className={`${SURFACE_CLASSES.popover} pointer-events-auto absolute z-20 w-56 -translate-x-1/2 rounded-lg p-1 text-sm text-popover-foreground`}
         style={{ left: screenPosition.x, top: screenPosition.y }}
         role="menu"
         aria-label="Add a connected node"
@@ -647,7 +649,7 @@ function SpawnPickerMenu({
             type="button"
             role="menuitem"
             onClick={() => onSelect(candidate)}
-            className="relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none select-none hover:bg-muted hover:text-foreground"
+            className="relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none select-none hover:bg-[var(--studio-control-hover)] hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)]"
           >
             {nodeTypeLabel(candidate.nodeType)}
           </button>

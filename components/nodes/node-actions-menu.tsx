@@ -24,7 +24,7 @@ export function NodeActionsMenu({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="nodrag flex size-5 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="nodrag flex size-5 shrink-0 items-center justify-center rounded-full border border-[var(--studio-border)] bg-[var(--studio-input)] text-muted-foreground shadow-sm transition-colors hover:border-[var(--studio-border-strong)] hover:bg-[var(--studio-control-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)]"
           aria-label="Node actions"
         >
           <MoreVertical className="size-3.5" />

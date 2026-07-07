@@ -2,6 +2,7 @@ import { Handle, Position, type HandleType } from "@xyflow/react";
 import { Image as ImageIcon, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DataType } from "@/lib/connection-rules";
+import { DATA_TYPE_TREATMENTS } from "@/lib/visual-system";
 
 // HandleBadge (CONTEXT.md / PRD issue #17): every node's connection points
 // were a near-invisible, unlabeled dot in the theme's default color. This
@@ -9,9 +10,8 @@ import type { DataType } from "@/lib/connection-rules";
 // default ~6px) around a centered glyph naming its data type — literal "T"
 // for text, an image icon for image, a video icon for video — applied
 // consistently to both input and output handles across all four node types.
-// Background/border stays neutral (existing border-border/bg-* tokens): the
-// glyph, not color, carries the data-type distinction, matching the app's
-// monochrome UI (per PRD "Out of scope": no color-coding).
+// The data-type distinction uses both the shared semantic color treatment
+// and a visible glyph/title, so color is never the only cue.
 export function HandleBadge({
   type,
   position,
@@ -27,11 +27,20 @@ export function HandleBadge({
   title?: string;
   style?: React.CSSProperties;
 }) {
+  const treatment = DATA_TYPE_TREATMENTS[dataType];
   return (
-    <Handle type={type} position={position} id={id} style={style} title={title}>
+    <Handle
+      type={type}
+      position={position}
+      id={id}
+      style={style}
+      title={title ?? treatment.label}
+      aria-label={`${treatment.label} ${type} handle`}
+    >
       <div
         className={cn(
-          "pointer-events-none absolute left-1/2 top-1/2 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-background text-[10px] font-semibold text-foreground",
+          "pointer-events-none absolute left-1/2 top-1/2 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-[10px] font-semibold shadow-sm ring-2 ring-white",
+          treatment.classes,
         )}
       >
         <DataTypeGlyph dataType={dataType} />

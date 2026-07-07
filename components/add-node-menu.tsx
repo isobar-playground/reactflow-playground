@@ -3,6 +3,7 @@
 import { NODE_TYPE_OPTIONS, type NodeTypeKey } from "@/lib/add-node-menu";
 import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
+import { SURFACE_CLASSES } from "@/lib/visual-system";
 
 // Right-click menu: standard dismissable Radix ContextMenu content (real
 // "menuitem" roles + roving focus), opened by the caller's
@@ -37,7 +38,7 @@ export function EmptyCanvasMenu({
   return (
     <div
       className={cn(
-        "pointer-events-auto absolute top-1/2 left-1/2 z-10 w-56 -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-1 text-sm text-popover-foreground shadow-lg ring-1 ring-foreground/10",
+        `${SURFACE_CLASSES.popover} pointer-events-auto absolute top-1/2 left-1/2 z-10 w-56 -translate-x-1/2 -translate-y-1/2 rounded-lg p-1 text-sm text-popover-foreground`,
         className,
       )}
       role="menu"
@@ -52,7 +53,7 @@ export function EmptyCanvasMenu({
           type="button"
           role="menuitem"
           onClick={() => onSelect(option.type)}
-          className="relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none select-none hover:bg-muted hover:text-foreground"
+          className="relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none select-none hover:bg-[var(--studio-control-hover)] hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-[var(--studio-focus-ring)]"
         >
           {option.label}
         </button>
