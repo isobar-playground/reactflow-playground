@@ -294,7 +294,7 @@ describe("VideoGenerationNode mode (issue #11)", () => {
 });
 
 describe("VideoGenerationNode text handle and Resolved Prompt", () => {
-  it("shows the Resolved Prompt preview combining a connected Static Text Reference with the local prompt", () => {
+  it("does not render an inline Resolved Prompt preview on the node surface", () => {
     const nodes: Node[] = [
       {
         id: "ref1",
@@ -326,7 +326,9 @@ describe("VideoGenerationNode text handle and Resolved Prompt", () => {
 
     renderWithNodes(nodes, edges);
 
-    expect(screen.getByText("a red car driving fast")).toBeInTheDocument();
+    expect(screen.queryByText("Resolved Prompt")).not.toBeInTheDocument();
+    expect(screen.queryByText("a red car driving fast")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/prompt/i)).toHaveValue("driving fast");
   });
 });
 
@@ -429,6 +431,7 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
       kind: "video",
       url: "/sample-video.mp4",
     });
+    vi.spyOn(realGeneration, "submitVideoGeneration").mockReturnValue(new Promise(() => {}));
     const user = userEvent.setup();
     const { container } = renderNode({ prompt: "", history: { entries: [], activeId: null }, model: testModel });
 
@@ -483,8 +486,20 @@ describe("VideoGenerationNode variant cloning (issue #12)", () => {
       );
       expect(cloneContainers).toHaveLength(2);
       for (const clone of cloneContainers) {
-        expect(within(clone).getByText("a red car")).toBeInTheDocument();
+        expect(screen.getByLabelText(`Edge from ref1 to ${clone.dataset.id}`)).toBeInTheDocument();
       }
+    });
+
+    await waitFor(() => {
+      expect(realGeneration.submitVideoGeneration).toHaveBeenCalledTimes(2);
+      expect(realGeneration.submitVideoGeneration).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ prompt: "a red car" }),
+      );
+      expect(realGeneration.submitVideoGeneration).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ prompt: "a red car" }),
+      );
     });
   });
 });
@@ -1350,7 +1365,7 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
-  it("does not include the negative prompt in the Resolved Prompt preview", () => {
+  it("does not render prompt details on the node surface when negative prompt is configured", () => {
     renderNode({
       prompt: "a dog running",
       history: { entries: [], activeId: null },
@@ -1364,10 +1379,9 @@ describe("VideoGenerationNode negative-prompt config field (issue #32)", () => {
       negativePrompt: "blurry, low quality",
     });
 
-    const resolvedPromptHeading = screen.getByText("Resolved Prompt");
-    const resolvedPromptBlock = resolvedPromptHeading.parentElement as HTMLElement;
-    expect(within(resolvedPromptBlock).getByText("a dog running")).toBeInTheDocument();
-    expect(within(resolvedPromptBlock).queryByText(/blurry/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Resolved Prompt")).not.toBeInTheDocument();
+    expect(screen.queryByText(/blurry/i)).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/prompt/i)).toHaveValue("a dog running");
   });
 });
 

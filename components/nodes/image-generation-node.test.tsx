@@ -579,7 +579,7 @@ describe("ImageGenerationNode text handle and Resolved Prompt", () => {
     );
   }
 
-  it("shows the Resolved Prompt preview combining a connected Static Text Reference with the local prompt", () => {
+  it("does not render an inline Resolved Prompt preview on the node surface", () => {
     const nodes: Node[] = [
       {
         id: "ref1",
@@ -609,10 +609,17 @@ describe("ImageGenerationNode text handle and Resolved Prompt", () => {
 
     renderWithTextRef(nodes, edges);
 
-    expect(screen.getByText("a red car in a driveway")).toBeInTheDocument();
+    expect(screen.queryByText("Resolved Prompt")).not.toBeInTheDocument();
+    expect(screen.queryByText("a red car in a driveway")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/prompt/i)).toHaveValue("in a driveway");
   });
 
-  it("concatenates multiple connected text references in edge order before the local prompt", () => {
+  it("submits multiple connected text references in edge order before the local prompt", async () => {
+    const run = vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/out.png",
+    });
+    const user = userEvent.setup();
     const nodes: Node[] = [
       {
         id: "ref1",
@@ -636,7 +643,7 @@ describe("ImageGenerationNode text handle and Resolved Prompt", () => {
         position: { x: 300, y: 0 },
         initialWidth: 400,
         initialHeight: 500,
-        data: { prompt: "combined", history: { entries: [], activeId: null } },
+        data: { prompt: "combined", history: { entries: [], activeId: null }, model: testModel },
       },
     ];
     const edges: Edge[] = [
@@ -644,9 +651,16 @@ describe("ImageGenerationNode text handle and Resolved Prompt", () => {
       { id: "e2", source: "ref2", target: "gen1", targetHandle: "text" },
     ];
 
-    renderWithTextRef(nodes, edges);
+    renderInCanvas(nodes, edges);
 
-    expect(screen.getByText("a red car a happy dog combined")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({ prompt: "a red car a happy dog combined" }),
+        expect.anything(),
+      );
+    });
   });
 });
 
@@ -821,9 +835,8 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
     await user.click(within(gen1Container).getByRole("button", { name: "Generate" }));
 
     // The two clones are new imageGeneration nodes distinct from gen1 and
-    // downstream; each should show the Resolved Prompt from the inherited
-    // text edge, proving it was wired to a fresh incoming edge — not to
-    // downstream, which never had a text edge in the first place.
+    // downstream; each inherits a fresh incoming text edge, and no outgoing
+    // edge from gen1 is duplicated onto a clone.
     await waitFor(() => {
       const nodeContainers = Array.from(
         document.querySelectorAll<HTMLElement>(".react-flow__node[data-id]"),
@@ -833,12 +846,25 @@ describe("ImageGenerationNode variant cloning (issue #12)", () => {
       );
       expect(cloneContainers).toHaveLength(2);
       for (const clone of cloneContainers) {
-        expect(within(clone).getByText("a red car")).toBeInTheDocument();
+        expect(screen.getByLabelText(`Edge from ref1 to ${clone.dataset.id}`)).toBeInTheDocument();
+        expect(screen.queryByLabelText(`Edge from ${clone.dataset.id} to downstream`)).not.toBeInTheDocument();
       }
     });
 
+    await waitFor(() => {
+      expect(realGeneration.submitImageGeneration).toHaveBeenCalledTimes(2);
+      expect(realGeneration.submitImageGeneration).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ prompt: "a red car" }),
+      );
+      expect(realGeneration.submitImageGeneration).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ prompt: "a red car" }),
+      );
+    });
+
     // downstream never had a text edge, and outgoing edges from gen1 are
-    // never duplicated onto a clone — it must still show no Resolved Prompt.
+    // never duplicated onto a clone.
     const downstreamContainer = document.querySelector('[data-node-id="downstream"]') as HTMLElement;
     expect(within(downstreamContainer).queryByText(/resolved prompt/i)).not.toBeInTheDocument();
   });
@@ -1502,7 +1528,7 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
     expect(screen.queryByLabelText(/negative prompt/i)).not.toBeInTheDocument();
   });
 
-  it("does not include the negative prompt in the Resolved Prompt preview", () => {
+  it("does not render prompt details on the node surface when negative prompt is configured", () => {
     renderNode({
       prompt: "a cat",
       history: { entries: [], activeId: null },
@@ -1516,10 +1542,9 @@ describe("ImageGenerationNode negative-prompt config field (issue #32)", () => {
       negativePrompt: "blurry, low quality",
     });
 
-    const resolvedPromptHeading = screen.getByText("Resolved Prompt");
-    const resolvedPromptBlock = resolvedPromptHeading.parentElement as HTMLElement;
-    expect(within(resolvedPromptBlock).getByText("a cat")).toBeInTheDocument();
-    expect(within(resolvedPromptBlock).queryByText(/blurry/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Resolved Prompt")).not.toBeInTheDocument();
+    expect(screen.queryByText(/blurry/i)).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/prompt/i)).toHaveValue("a cat");
   });
 });
 
@@ -2059,7 +2084,7 @@ describe("ImageGenerationNode: clones land immediately and their runs are resuma
     await user.click(within(gen1Container).getByRole("button", { name: "Generate" }));
 
     // Both clones are on the canvas although no run has finished, and each
-    // shows the Resolved Prompt from its inherited incoming text edge.
+    // has an inherited incoming text edge.
     await waitFor(() => {
       const nodeContainers = Array.from(
         document.querySelectorAll<HTMLElement>(".react-flow__node[data-id]"),
@@ -2069,7 +2094,7 @@ describe("ImageGenerationNode: clones land immediately and their runs are resuma
       );
       expect(cloneContainers).toHaveLength(2);
       for (const clone of cloneContainers) {
-        expect(within(clone).getByText("a red car")).toBeInTheDocument();
+        expect(screen.getByLabelText(`Edge from ref1 to ${clone.dataset.id}`)).toBeInTheDocument();
       }
     });
   });

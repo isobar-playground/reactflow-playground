@@ -510,15 +510,6 @@ export function VideoGenerationNode({ id, data }: NodeProps<VideoGenerationNodeT
         data-node-id={id}
       />
 
-      {/* Resolved Prompt preview (CONTEXT.md): connected Static Text
-          References (edge order) concatenated with the local prompt. */}
-      {resolvedPromptText.length > 0 && (
-        <div className="mb-3 rounded-md border border-[var(--studio-border)] bg-muted p-2 text-xs text-muted-foreground">
-          <div className="mb-1 font-medium">Resolved Prompt</div>
-          <div>{resolvedPromptText}</div>
-        </div>
-      )}
-
       <div className="mb-3 flex items-center gap-2">
         <label htmlFor={`variant-count-${id}`} className="text-xs text-muted-foreground">
           Variants

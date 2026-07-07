@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
@@ -11,6 +11,15 @@ import {
 } from "@xyflow/react";
 import { StaticTextReferenceNode } from "./static-text-reference-node";
 import { ImageGenerationNode } from "./image-generation-node";
+import * as realGeneration from "@/lib/real-generation";
+
+vi.mock("@/lib/real-generation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/real-generation")>();
+  return {
+    ...actual,
+    runImageGeneration: vi.fn(),
+  };
+});
 
 const nodeTypes = {
   staticTextReference: StaticTextReferenceNode,
@@ -61,6 +70,10 @@ function renderNode(data: { text: string } = { text: "" }) {
 }
 
 describe("StaticTextReferenceNode", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("presents itself as a compact text source", () => {
     const { container } = renderNode({ text: "hello" });
 
@@ -98,10 +111,14 @@ describe("StaticTextReferenceNode", () => {
   // ADR-0002: node data is the single source of truth for persisted canvas
   // content. Typing must write through to the node's `data.text`, not just
   // local component state — verified here through a downstream consumer
-  // (a connected Image Generation Node's Resolved Prompt reads
-  // useNodesData(...).data.text), the same way a reload or another node
-  // would observe it, rather than asserting on the DOM value alone.
+  // submitting its Resolved Prompt from useNodesData(...).data.text, the
+  // same way a reload or another node would observe it, rather than
+  // asserting on the DOM value alone.
   it("writes typed text through to node data, observable by a connected consumer", async () => {
+    const run = vi.spyOn(realGeneration, "runImageGeneration").mockResolvedValue({
+      kind: "image",
+      url: "https://fal.media/out.png",
+    });
     const user = userEvent.setup();
     const nodes: Node[] = [
       {
@@ -118,7 +135,17 @@ describe("StaticTextReferenceNode", () => {
         position: { x: 300, y: 0 },
         initialWidth: 400,
         initialHeight: 500,
-        data: { prompt: "", history: { entries: [], activeId: null } },
+        data: {
+          prompt: "",
+          history: { entries: [], activeId: null },
+          model: {
+            endpointId: "fal-ai/flux/dev",
+            name: "FLUX.1 [dev]",
+            category: "text-to-image",
+            handles: [],
+            hasNegativePrompt: false,
+          },
+        },
       },
     ];
     const edges: Edge[] = [
@@ -131,8 +158,13 @@ describe("StaticTextReferenceNode", () => {
     await user.type(textarea, "a red car");
 
     const gen1Container = document.querySelector('[data-node-id="gen1"]') as HTMLElement;
+    await user.click(within(gen1Container).getByRole("button", { name: "Generate" }));
+
     await waitFor(() => {
-      expect(within(gen1Container).getByText("a red car")).toBeInTheDocument();
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({ endpointId: "fal-ai/flux/dev", prompt: "a red car" }),
+        expect.anything(),
+      );
     });
   });
 });

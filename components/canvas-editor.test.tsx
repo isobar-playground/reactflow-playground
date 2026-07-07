@@ -351,7 +351,7 @@ describe("CanvasEditor Node Details Drawer", () => {
       />,
     );
 
-    await screen.findByText("reference prompt local prompt");
+    await screen.findByDisplayValue("local prompt");
 
     const node = container.querySelector('.react-flow__node[data-id="gen1"]') as HTMLElement;
     fireEvent.click(node);
@@ -820,10 +820,13 @@ describe("CanvasEditor connection validation", () => {
       />,
     );
 
-    // The saved edge round-tripped into React Flow's edge state and was
-    // picked up by the Image Generation Node's Resolved Prompt preview —
-    // proof the connection was accepted and consumed correctly.
-    expect(await screen.findByText("a red car in a driveway")).toBeInTheDocument();
+    await screen.findByDisplayValue("in a driveway");
+    const node = document.querySelector('.react-flow__node[data-id="gen1"]') as HTMLElement;
+    fireEvent.click(node);
+
+    const drawer = await screen.findByRole("region", { name: "Node details drawer" });
+    const resolvedPromptSection = within(drawer).getByText("Resolved Prompt").closest("section") as HTMLElement;
+    expect(within(resolvedPromptSection).getByText("a red car in a driveway")).toBeInTheDocument();
   });
 });
 
@@ -1164,7 +1167,7 @@ describe("CanvasEditor node actions menu (delete/duplicate)", () => {
       />,
     );
 
-    expect(await screen.findByText("a red car in a driveway")).toBeInTheDocument();
+    await screen.findByDisplayValue("in a driveway");
 
     const refNode = container.querySelector('.react-flow__node[data-id="ref1"]') as HTMLElement;
     await user.click(within(refNode).getByRole("button", { name: "Node actions" }));
@@ -1203,7 +1206,10 @@ describe("CanvasEditor edge deletion between any node types", () => {
       />,
     );
 
-    expect(await screen.findByText("a red car in a driveway")).toBeInTheDocument();
+    await screen.findByDisplayValue("in a driveway");
+    await waitFor(() => {
+      expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(1);
+    });
 
     const edgeElement = container.querySelector(".react-flow__edge") as HTMLElement;
     fireEvent.click(edgeElement);
@@ -1296,7 +1302,10 @@ describe("CanvasEditor edge deletion between any node types", () => {
       />,
     );
 
-    expect(await screen.findByText("a red car in a driveway")).toBeInTheDocument();
+    await screen.findByDisplayValue("in a driveway");
+    await waitFor(() => {
+      expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(1);
+    });
 
     expect(screen.queryByRole("button", { name: "Delete edge" })).not.toBeInTheDocument();
 
